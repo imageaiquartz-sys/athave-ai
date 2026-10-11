@@ -33,3 +33,16 @@ A simple single-line image balance / Top up link, with modest spacing before Gen
 - Verify failing login cannot read `/api/admin/users`. Verify customer OTP cannot read admin endpoints.
 - Verify redeem codes and Razorpay orders in Test Mode before enabling real payments.
 - Gemini image generation uses backend API and must be configured separately. Keep GENERATION_ENABLED=false until tested.
+
+
+## V7 admin redeem form hotfix
+Fixed red error `Cannot read properties of null (reading 'reset')` after creating a redeem code. Only `public/admin.js` changed. The successful redeem code may already be saved in Supabase; refresh the admin page and inspect the list before creating another. No SQL, Cloudflare secret, or other deployment change is needed.
+
+
+## V7 Gemini image-format API fix (October 2026)
+
+The image-generation request previously sent `generationConfig.responseFormat.image.aspectRatio='1:1'`, which Google parsed as an enum and rejected with `Invalid value at generation_config.response_format.image.aspect_ratio`. The backend now uses `generationConfig.imageConfig` with string `aspectRatio: '1:1'` and `imageSize: '1K'`, as documented by the Google Gemini Generate Content API. This changes **only** `functions/api/[[path]].js`.
+
+Upload the modified file to GitHub at the **exact same path** (the double brackets are part of the filename), commit to `main`, wait for Cloudflare Pages deployment success, and try one test image. Cloudflare secrets/SQL do not need updating. Images may incur Gemini charges. The generated original is returned by Gemini, with 1024x1024 WebP optimization in the customer browser on download.
+
+Documentation: https://ai.google.dev/api/generate-content
