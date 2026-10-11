@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://athave-ai.pages.dev/sitemap.xml

@@ -12,8 +12,8 @@ async function sha(s){return b64url(await crypto.subtle.digest('SHA-256',enc.enc
 async function hmac(secret,data){let key=await crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);return b64url(await crypto.subtle.sign('HMAC',key,enc.encode(data)))}
 async function signSession(env,id){let payload=b64url(enc.encode(JSON.stringify({id,exp:Date.now()+14*86400000})));return `${payload}.${await hmac(env.SESSION_SECRET,payload)}`}
 async function readSession(req,env){const token=cookies(req)[COOKIE];if(!token||!env.SESSION_SECRET)return null;let parts=token.split('.');if(parts.length!==2)return null;const expected=await hmac(env.SESSION_SECRET,parts[0]);if(expected!==parts[1])return null;try{let p=JSON.parse(new TextDecoder().decode(unb64url(parts[0])));if(p.exp<=Date.now()||!p.id)return null;return p.id}catch{return null}}
-function setCookie(name,value,age=1209600){return `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${age}; HttpOnly; Secure; SameSite=Strict`}
-function clearCookie(name){return `${name}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`}
+function setCookie(name,value,age=1209600){return `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${age}; HttpOnly; Secure; SameSite=Lax`}
+function clearCookie(name){return `${name}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`}
 function phone(raw){let n=String(raw||'').replace(/\D/g,'');if(n.length===10)n='91'+n;return /^91[6-9][0-9]{9}$/.test(n)?n:null}
 
 // CAPTCHA-free OTP widget API. OTP requests are server-side, capped in Supabase,
@@ -67,8 +67,8 @@ async function finishVerifiedLogin(env,verifiedPhone,accessToken){
  const result=await rpc(env,'prepare_phone_login',{
   p_phone:verifiedPhone,p_token_digest:await sha(accessToken),p_claim_digest:await sha(pending)
  });
- if(result.needs_name)return json({needsName:true},200,{'set-cookie':setCookie(PENDING,pending,600)});
- return json({signedIn:true},200,{'set-cookie':setCookie(COOKIE,await signSession(env,result.customer_id))});
+ if(result.needs_name){const reply=json({needsName:true});reply.headers.append('set-cookie',setCookie(PENDING,pending,600));reply.headers.append('set-cookie',clearCookie(COOKIE));return reply;}
+ const reply=json({signedIn:true});reply.headers.append('set-cookie',setCookie(COOKIE,await signSession(env,result.customer_id)));reply.headers.append('set-cookie',clearCookie(PENDING));return reply;
 }
 function validateInputImages(list){if(!Array.isArray(list)||!list.length||list.length>2)throw Error('Upload one or two images');return list.map(x=>{if(!x||x.mime!=='image/jpeg'||typeof x.data!=='string'||x.data.length>1600000||!/^[A-Za-z0-9+/=]+$/.test(x.data))throw Error('Please upload JPG/PNG/WebP photos under 7 MB (browser optimization failed)');return {inlineData:{mimeType:'image/jpeg',data:x.data}}})}
 async function supa(env,method,relative,body=null,opts={}){
@@ -184,10 +184,20 @@ export async function onRequest({request,env,params}){
    const id=await rpc(env,'complete_phone_signup',{p_claim_digest:await sha(token),p_name:name});
    const reply=json({signedIn:true});reply.headers.append('set-cookie',setCookie(COOKIE,await signSession(env,id)));reply.headers.append('set-cookie',clearCookie(PENDING));return reply;
   }
-  if(method==='POST'&&route==='auth/logout')return json({ok:true},200,{'set-cookie':clearCookie(COOKIE)});
+  if(method==='GET'&&route==='auth/session'){
+    const user=await current(request,env);
+    return user?json({authenticated:true,name:user.name,phoneLast4:user.phone.slice(-4)}):json({authenticated:false},401);
+  }
+  if(method==='POST'&&route==='auth/logout'){
+    const response=json({ok:true});
+    response.headers.append('set-cookie',clearCookie(COOKIE));
+    response.headers.append('set-cookie',clearCookie(PENDING));
+    response.headers.append('set-cookie',clearCookie(OTP_COOKIE));
+    return response;
+  }
   const user=await current(request,env);if(!user)return err('Please log in with your mobile number',401);
   if(method==='GET'&&route==='me'){
-   await rpc(env,'refund_stale_generations',{p_customer:user.id});
+   try{await rpc(env,'refund_stale_generations',{p_customer:user.id})}catch(e){console.warn('Optional stale generation cleanup:',String(e.message).slice(0,120))};
    const wallet=(await tbl(env,'GET','wallets',`?customer_id=eq.${user.id}&select=balance,purchased,used`))?.[0]||{balance:0,purchased:0,used:0};
    const payments=await tbl(env,'GET','payments',`?customer_id=eq.${user.id}&select=plan,amount_paise,credits,status,created_at&order=created_at.desc&limit=12`);
    return json({user:{phone:user.phone,name:user.name,isAdmin:user.is_admin},wallet,history:await getHistory(env,user.id),payments});
