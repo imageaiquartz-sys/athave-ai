@@ -1,5 +1,5 @@
 const $=id=>document.getElementById(id);
-let config=null, me=null, uploaded=[], msg91Ready=null, currentPhone='', lastReqId='', activeTab='history', isGenerating=false;
+let config=null, me=null, uploaded=[], currentPhone='', activeTab='history', isGenerating=false;
 const show=(el,visible)=>{el.hidden=!visible};
 const status=(msg,isError=false)=>{$('studioStatus').textContent=msg;$('studioStatus').classList.toggle('error',isError)};
 const authStatus=(msg,isError=false)=>{$('authMsg').textContent=msg;$('authMsg').classList.toggle('error',isError)};
@@ -11,42 +11,66 @@ function authStep(s){for(let name of ['phoneForm','otpForm','nameForm'])show($(n
 for(let id of ['navAccount','heroStart','ctaStart'])$(id).addEventListener('click',()=>{if(me){location.hash='#studio'}else openLogin()});
 $('modalShade').onclick=closeLogin;$('closeAuth').onclick=closeLogin;
 $('changePhone').onclick=()=>{authStep('phoneForm');authStatus('');$('otp').value=''};
-async function loadMsg91(){
- if(msg91Ready)return msg91Ready;
- msg91Ready=new Promise((resolve,reject)=>{
-  if(!config?.login)return reject(Error('OTP system is not configured. Complete Cloudflare secrets first.'));
-  const script=document.createElement('script');script.src='https://verify.msg91.com/otp-provider.js';
-  script.onload=()=>{
-   try{if(typeof window.initSendOTP!=='function')throw Error('MSG91 SDK unavailable');
-    window.initSendOTP({widgetId:config.widgetId,tokenAuth:config.widgetToken,exposeMethods:true,captchaRenderId:'captchaBox',success:()=>{},failure:()=>{}});
-    resolve();
-   }catch(e){reject(e)}
-  };script.onerror=()=>reject(Error('Could not load MSG91 OTP SDK'));
-  document.head.append(script);
- });return msg91Ready;
+// OTP is sent and verified by the Cloudflare backend via the official MSG91
+// Widget API. We intentionally do not embed the MSG91 browser SDK or CAPTCHA.
+const RESEND_DELAY_SECONDS=60;
+let otpLastSentAt=0;
+let sendingOtp=false;
+let verifyingOtp=false;
+function setOtpBusy(isBusy){
+ const send=$('phoneForm').querySelector('[type="submit"]');
+ const verify=$('otpForm').querySelector('[type="submit"]');
+ send.disabled=isBusy;verify.disabled=isBusy;
+}
+function updateRetryButton(){
+ const button=$('retryOtp');
+ const seconds=Math.max(0,Math.ceil((otpLastSentAt+RESEND_DELAY_SECONDS*1000-Date.now())/1000));
+ button.disabled=seconds>0||sendingOtp;
+ button.textContent=seconds>0?`Resend in ${seconds}s`:'Resend code';
+}
+setInterval(updateRetryButton,1000);
+async function sendOtpFromServer(){
+ if(sendingOtp)return;
+ sendingOtp=true;setOtpBusy(true);
+ try{
+  authStatus('Sending verification code...');
+  await post('auth/send-otp',{phone:currentPhone});
+  otpLastSentAt=Date.now();
+  $('otp').value='';authStep('otpForm');
+  authStatus('OTP sent. Enter the code received on your phone.');
+ }catch(e){authStatus(e.message||'Could not send OTP',true)}
+ finally{sendingOtp=false;setOtpBusy(false);updateRetryButton()}
 }
 $('phoneForm').onsubmit=async ev=>{
- ev.preventDefault();let number=String($('phone').value||'').replace(/\D/g,'');if(!/^[6-9]\d{9}$/.test(number)){authStatus('Enter a valid Indian mobile number',true);return}
+ ev.preventDefault();
+ const number=String($('phone').value||'').replace(/\D/g,'');
+ if(!/^[6-9]\d{9}$/.test(number)){
+  authStatus('Enter a valid Indian mobile number',true);return;
+ }
  currentPhone='91'+number;
- try{authStatus('Connecting to OTP service...');await loadMsg91();authStatus('Sending verification code...');
-  window.sendOtp(currentPhone,data=>{lastReqId=data?.reqId||data?.requestId||data?.data?.reqId||(typeof data?.message==='string'?data.message:'')||'';authStep('otpForm');authStatus('OTP sent. Please enter your code.')},e=>authStatus(e?.message||'Could not send the OTP',true));
- }catch(e){authStatus(e.message,true)}
+ await sendOtpFromServer();
 };
-function accessTokenFrom(result){if(typeof result==='string'&&result.includes('.'))return result;if(typeof result?.message==='string'&&result.message.includes('.'))return result.message;return result?.['access-token']||result?.access_token||result?.accessToken||result?.token||result?.jwt||result?.data?.['access-token']||result?.data?.access_token||result?.data?.accessToken||result?.data?.token||result?.message?.accessToken||''}
-$('otpForm').onsubmit=ev=>{
- ev.preventDefault();let code=$('otp').value.trim();if(!/^\d{4,8}$/.test(code)){authStatus('Enter the OTP code',true);return}
- authStatus('Verifying your number...');
- window.verifyOtp(code,async data=>{
-  try{let token=accessTokenFrom(data);if(!token)throw Error('No access token returned by MSG91. Check your widget integration.');
-   const result=await post('auth/verify',{phone:currentPhone,accessToken:token});
-   if(result.needsName){authStep('nameForm');authStatus('Verified! Enter your name once to finish creating your account.')}else{
-    closeLogin();authStep('phoneForm');await refresh();status('Welcome! Upload your product photos to begin.')
-   }
-  }catch(e){authStatus(e.message,true)}
- },e=>authStatus(e?.message||'OTP verification failed',true),lastReqId||undefined);
+$('otpForm').onsubmit=async ev=>{
+ ev.preventDefault();if(verifyingOtp)return;
+ const code=$('otp').value.trim();
+ if(!/^\d{4,8}$/.test(code)){authStatus('Enter the OTP code',true);return}
+ verifyingOtp=true;setOtpBusy(true);
+ try{
+  authStatus('Verifying your number...');
+  const result=await post('auth/verify-otp',{otp:code});
+  if(result.needsName){
+   authStep('nameForm');authStatus('Verified! Enter your name once to finish your account.');
+  }else{
+   closeLogin();authStep('phoneForm');
+   await refresh();status('Welcome! Upload your product photos to begin.');
+  }
+ }catch(e){authStatus(e.message||'OTP verification failed',true)}
+ finally{verifyingOtp=false;setOtpBusy(false)}
 };
 $('retryOtp').onclick=()=>{
- authStatus('Resending...');window.retryOtp(null,()=>authStatus('OTP resent.'),e=>authStatus(e?.message||'Could not resend OTP',true),lastReqId||undefined)
+ if(Date.now()<otpLastSentAt+RESEND_DELAY_SECONDS*1000){updateRetryButton();return}
+ if(!currentPhone){authStep('phoneForm');return}
+ sendOtpFromServer();
 };
 $('nameForm').onsubmit=async ev=>{ev.preventDefault();try{let name=$('name').value.trim();if(!name)throw Error('Please enter your name');
  await post('auth/complete',{name});closeLogin();authStep('phoneForm');await refresh();status('Account created successfully. You can start generating.')

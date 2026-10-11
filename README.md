@@ -1,3 +1,31 @@
+# Athave AI — OTP Fix (October 2026)
+
+**What changed:** Login now uses the documented MSG91 OTP Widget *server APIs* (`sendOtp`, `verifyOtp`, `verifyAccessToken`) from your Cloudflare Pages Function. The site does not load `otp-provider.js`, never calls `window.sendOtp`, and no longer displays any CAPTCHA field. Server-side Supabase rate limits help prevent SMS abuse. All original website, images, payments and generation functions are preserved.
+
+## Deploy this update onto your existing GitHub repository
+
+1. **Do the SQL step first**: Supabase > StudioWhite > SQL Editor > New query. Paste and run **`sql/otp_rate_limit_patch.sql`**. Run it once even though you already ran `sql/setup.sql`; this is an additional database migration.
+2. Extract this ZIP onto your computer.
+3. In your existing `athave-ai` GitHub repository on the **`main` branch**, replace the files at these exact paths with the supplied files:
+   - `public/index.html` (removes CAPTCHA element)
+   - `public/app.js` (new OTP user interface)
+   - `functions/api/[[path]].js` (OTP backend + rate-limiting)
+   - add `sql/otp_rate_limit_patch.sql` for records
+4. Keep `public/assets`, other files, logo and all Cloudflare secrets unchanged.
+5. Commit the GitHub changes. Cloudflare Pages should automatically deploy the commit. Wait for successful production deploy, then on mobile refresh with cache cleared or an incognito tab.
+6. Open `https://athave-ai.pages.dev`, request OTP, verify, then complete first-time name/signup if prompted.
+7. If SMS fails, check **MSG91 > OTP Widget/SDK > Logs** for the exact error. MSG91 may still require eligible channel/subscription/KYC/approved sender/India DLT depending on your account; code cannot bypass those requirements.
+
+**No new Cloudflare secrets needed** if you already configured:
+`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `MSG91_WIDGET_ID`, `MSG91_AUTH_KEY`, `SESSION_SECRET`.
+`MSG91_WIDGET_TOKEN` may stay configured but the backend-only OTP API flow does not need to expose it to browsers.
+
+**Safety:** This fix keeps actual OTP verification at MSG91, validates the verified phone again on the backend, and does not accept any locally invented OTP. Requests are limited per phone and network in the SQL migration. Never test live keys by pasting them in GitHub. Do not accept payments until all services are tested end to end.
+
+**Testing note:** The project passed offline mocked API tests, but real SMS delivery and OTP verification on your specific MSG91 account still need live testing. If the MSG91 server rejects the API-based route, your widget plan or Authkey permissions may require adjustment; check its logs. Do not replace server verification with mock success or a fixed OTP.
+
+---
+
 # Athave AI — GitHub + Cloudflare Pages (NO REPLIT)
 
 Athave AI is a mobile-friendly HTML/CSS/JS website with a Cloudflare Pages Functions backend, a private Supabase database, MSG91 OTP Widget phone login, Gemini image-editing, and verified Razorpay top-ups.
@@ -53,7 +81,7 @@ You already configured:
 
 In MSG91, make sure Widget is **Enabled**, channel SMS works for Indian numbers, and the default MSG91 sender/template is authorized for this Widget product. Your account still needs whatever provider verification/subscription MSG91 requires.
 
-The client uses `https://verify.msg91.com/otp-provider.js` with `exposeMethods: true`. The server verifies returned OTP access tokens at `https://control.msg91.com/api/v5/widget/verifyAccessToken` before authorizing the phone, and uses one-time token claims to block replay.
+The Cloudflare backend uses the MSG91 Widget REST endpoints to send and verify OTP, avoiding the browser SDK and CAPTCHA. The server verifies returned OTP access tokens at `https://control.msg91.com/api/v5/widget/verifyAccessToken` before authorizing the phone, and uses one-time token claims to block replay.
 
 **Important:** MSG91 responses can differ by configuration. This integration deliberately **rejects a verification response that does not positively identify the verified mobile number**, even if the user entered a number. During your first real OTP test, if you see “MSG91 did not confirm the same mobile number,” we need to inspect the provider's documented response field and update the server parser. Do not bypass this check.
 
@@ -66,7 +94,7 @@ Cloudflare → **Workers & Pages** → your Pages project → **Settings → Var
 | `SUPABASE_URL` | Supabase Project URL | No |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase backend service key | **Yes** |
 | `MSG91_WIDGET_ID` | `366a6b694b72373637383033` | No |
-| `MSG91_WIDGET_TOKEN` | MSG91 `StudioWhiteWeb` token value | Widget client-readable |
+| `MSG91_WIDGET_TOKEN` | Optional legacy value (unused after OTP fix) | No |
 | `MSG91_AUTH_KEY` | MSG91 `StudioWhiteOTP` Authkey value | **Yes** |
 | `SESSION_SECRET` | Strong 32+ random characters | **Yes** |
 | `GEMINI_API_KEY` | Your funded Google AI Studio key | **Yes** |
@@ -79,7 +107,7 @@ Cloudflare → **Workers & Pages** → your Pages project → **Settings → Var
 | `MAX_GENERATIONS_PER_DAY` | `10` while testing | No |
 | `GENERATION_ENABLED` | `false` until login and payments tested, then `true` | No |
 
-`MSG91_WIDGET_TOKEN` is necessarily supplied to the client-side MSG91 SDK; **do not confuse it with `MSG91_AUTH_KEY`**. You can keep the four provider accounts signed into different email accounts. Their APIs do not require matching emails.
+`MSG91_WIDGET_TOKEN` is no longer needed for this server-side login flow; it can remain stored as a text variable but is not sent to the browser. Keep `MSG91_AUTH_KEY` encrypted. You can keep the four provider accounts signed into different email accounts. Their APIs do not require matching emails.
 
 ## 6. Razorpay top-up and webhook
 

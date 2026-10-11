@@ -1,5 +1,5 @@
 /* Athave AI Cloudflare Pages Function. All secrets live in Pages > Settings > Variables & Secrets. */
-const COOKIE='athave_session', PENDING='athave_pending', BUCKET='athave-results';
+const COOKIE='athave_session', PENDING='athave_pending', OTP_COOKIE='athave_otp_request', BUCKET='athave-results';
 const ALLOWED_KINDS=new Set(['shirt','polo shirt','t-shirt','hoodie','jacket','dress','pants','jeans','shorts','skirt','cap','shoe','bag','product']);
 const GARMENTS=new Set(['shirt','polo shirt','t-shirt','hoodie','jacket','dress','pants','jeans','shorts','skirt','cap']);
 const enc=new TextEncoder();
@@ -15,6 +15,61 @@ async function readSession(req,env){const token=cookies(req)[COOKIE];if(!token||
 function setCookie(name,value,age=1209600){return `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${age}; HttpOnly; Secure; SameSite=Strict`}
 function clearCookie(name){return `${name}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`}
 function phone(raw){let n=String(raw||'').replace(/\D/g,'');if(n.length===10)n='91'+n;return /^91[6-9][0-9]{9}$/.test(n)?n:null}
+
+// CAPTCHA-free OTP widget API. OTP requests are server-side, capped in Supabase,
+// and cryptographically bound to the visitor's HttpOnly cookie before verification.
+async function sealOtpCookie(env,phoneNumber,reqId){
+ const payload=b64url(enc.encode(JSON.stringify({p:phoneNumber,r:reqId,exp:Date.now()+10*60*1000})));
+ return `${payload}.${await hmac(env.SESSION_SECRET,payload)}`;
+}
+async function readOtpCookie(request,env){
+ const token=cookies(request)[OTP_COOKIE];if(!token||!env.SESSION_SECRET)return null;
+ const parts=token.split('.');if(parts.length!==2)return null;
+ if(await hmac(env.SESSION_SECRET,parts[0])!==parts[1])return null;
+ try{
+  const obj=JSON.parse(new TextDecoder().decode(unb64url(parts[0])));
+  return obj.exp>Date.now()&&phone(obj.p)===obj.p&&typeof obj.r==='string'&&obj.r.length>=8?obj:null;
+ }catch{return null;}
+}
+async function widgetApi(env,route,body){
+ if(!env.MSG91_WIDGET_ID||!env.MSG91_AUTH_KEY)throw Error('MSG91 is not configured');
+ const c=new AbortController(), timer=setTimeout(()=>c.abort(),20000);
+ try{
+  const resp=await fetch(`https://control.msg91.com/api/v5/widget/${route}`,{
+   method:'POST',headers:{accept:'application/json','content-type':'application/json',authkey:env.MSG91_AUTH_KEY},
+   body:JSON.stringify({widgetId:env.MSG91_WIDGET_ID,...body}),signal:c.signal
+  });
+  const answer=await resp.json().catch(()=>null);
+  if(!resp.ok||!answer||answer.type==='error'||answer.success===false||String(answer.code||'')==='201'){
+   const detail=typeof answer?.message==='string'?answer.message:'MSG91 rejected the request';
+   throw Error('MSG91: '+detail.slice(0,130));
+  }
+  return answer;
+ }finally{clearTimeout(timer)}
+}
+function widgetReqId(answer){
+ // Widget sendOtp usually returns the reqId in `message`.
+ for(const value of [answer?.reqId,answer?.requestId,answer?.data?.reqId,answer?.data?.requestId,answer?.message]){
+  if(typeof value==='string'&&/^[a-zA-Z0-9_-]{16,160}$/.test(value))return value;
+ }
+ return null;
+}
+function widgetAccessToken(answer){
+ for(const value of [answer?.['access-token'],answer?.access_token,answer?.accessToken,answer?.jwt,
+   answer?.data?.['access-token'],answer?.data?.accessToken,answer?.data?.access_token,answer?.data?.jwt,answer?.message]){
+   if(typeof value==='string'&&value.length>=50&&value.length<=6000&&value.split('.').length===3)return value;
+ }
+ return null;
+}
+async function finishVerifiedLogin(env,verifiedPhone,accessToken){
+ await verifyMsg91(env,accessToken,verifiedPhone);
+ const pending=crypto.randomUUID()+crypto.randomUUID();
+ const result=await rpc(env,'prepare_phone_login',{
+  p_phone:verifiedPhone,p_token_digest:await sha(accessToken),p_claim_digest:await sha(pending)
+ });
+ if(result.needs_name)return json({needsName:true},200,{'set-cookie':setCookie(PENDING,pending,600)});
+ return json({signedIn:true},200,{'set-cookie':setCookie(COOKIE,await signSession(env,result.customer_id))});
+}
 function validateInputImages(list){if(!Array.isArray(list)||!list.length||list.length>2)throw Error('Upload one or two images');return list.map(x=>{if(!x||x.mime!=='image/jpeg'||typeof x.data!=='string'||x.data.length>1600000||!/^[A-Za-z0-9+/=]+$/.test(x.data))throw Error('Please upload JPG/PNG/WebP photos under 7 MB (browser optimization failed)');return {inlineData:{mimeType:'image/jpeg',data:x.data}}})}
 async function supa(env,method,relative,body=null,opts={}){
  if(!env.SUPABASE_URL||!env.SUPABASE_SERVICE_ROLE_KEY)throw Error('Supabase not configured');
@@ -77,7 +132,7 @@ export async function onRequest({request,env,params}){
     const origin=request.headers.get('Origin');const expected=new URL(request.url).origin;
     if(origin!==expected)return err('Invalid request origin',403);
   }
-  if(method==='GET'&&route==='config')return json({brand:'Athave AI',login:!!(env.MSG91_WIDGET_ID&&env.MSG91_WIDGET_TOKEN&&env.MSG91_AUTH_KEY&&env.SESSION_SECRET&&env.SUPABASE_URL&&env.SUPABASE_SERVICE_ROLE_KEY),payments:!!(env.RAZORPAY_KEY_ID&&env.RAZORPAY_KEY_SECRET),ai:!!env.GEMINI_API_KEY,widgetId:env.MSG91_WIDGET_ID||'',widgetToken:env.MSG91_WIDGET_TOKEN||''});
+  if(method==='GET'&&route==='config')return json({brand:'Athave AI',login:!!(env.MSG91_WIDGET_ID&&env.MSG91_AUTH_KEY&&env.SESSION_SECRET&&env.SUPABASE_URL&&env.SUPABASE_SERVICE_ROLE_KEY),payments:!!(env.RAZORPAY_KEY_ID&&env.RAZORPAY_KEY_SECRET),ai:!!env.GEMINI_API_KEY,otpMode:'server'});
   if(method==='POST'&&route==='webhooks/razorpay'){
    const raw=await request.text(),sig=request.headers.get('x-razorpay-signature')||'';
    if(!env.RAZORPAY_WEBHOOK_SECRET)return err('Webhook secret required',503);
@@ -89,13 +144,39 @@ export async function onRequest({request,env,params}){
    }
    return json({ok:true});
   }
+  if(method==='POST'&&route==='auth/send-otp'){
+   if(!env.MSG91_WIDGET_ID||!env.MSG91_AUTH_KEY||!env.SESSION_SECRET||!env.SUPABASE_URL||!env.SUPABASE_SERVICE_ROLE_KEY)
+     return err('Login configuration is incomplete',503);
+   const body=await request.json(),n=phone(body.phone);
+   if(!n)return err('Enter a valid Indian mobile number');
+   const ip=request.headers.get('CF-Connecting-IP')||request.headers.get('X-Forwarded-For')?.split(',')[0]||'unknown';
+   const ipHash=await hmac(env.SESSION_SECRET,'otp-ip:'+ip);
+   await rpc(env,'reserve_otp_send',{p_phone:n,p_ip_digest:ipHash});
+   const sent=await widgetApi(env,'sendOtp',{identifier:n});
+   const reqId=widgetReqId(sent);
+   if(!reqId)throw Error('MSG91 sent an unexpected OTP response. Check OTP Widget logs; reqId not found.');
+   return json({sent:true},200,{'set-cookie':setCookie(OTP_COOKIE,await sealOtpCookie(env,n,reqId),600)});
+  }
+  if(method==='POST'&&route==='auth/verify-otp'){
+   if(!env.MSG91_AUTH_KEY||!env.SESSION_SECRET)return err('MSG91 verification unavailable',503);
+   const challenge=await readOtpCookie(request,env);
+   if(!challenge)return err('OTP request expired. Send a new code.',401);
+   const body=await request.json(),code=String(body.otp||'').trim();
+   if(!/^\d{4,8}$/.test(code))return err('Enter the OTP you received');
+   const ip=request.headers.get('CF-Connecting-IP')||request.headers.get('X-Forwarded-For')?.split(',')[0]||'unknown';
+   const ipHash=await hmac(env.SESSION_SECRET,'otp-ip:'+ip);
+   await rpc(env,'reserve_otp_verify',{p_phone:challenge.p,p_ip_digest:ipHash});
+   const verified=await widgetApi(env,'verifyOtp',{reqId:challenge.r,otp:code});
+   const jwt=widgetAccessToken(verified);
+   if(!jwt)throw Error('MSG91 returned no access token after OTP verification. Check MSG91 Widget logs.');
+   const login=await finishVerifiedLogin(env,challenge.p,jwt);
+   login.headers.append('set-cookie',clearCookie(OTP_COOKIE));
+   return login;
+  }
   if(method==='POST'&&route==='auth/verify'){
    let body=await request.json();const n=phone(body.phone),token=String(body.accessToken||'');
    if(!n||!token||token.length>6000)return err('Invalid verification details');
-   await verifyMsg91(env,token,n);
-   const pending=crypto.randomUUID()+crypto.randomUUID();const result=await rpc(env,'prepare_phone_login',{p_phone:n,p_token_digest:await sha(token),p_claim_digest:await sha(pending)});
-   if(result.needs_name)return json({needsName:true},200,{'set-cookie':setCookie(PENDING,pending,600)});
-   return json({signedIn:true},200,{'set-cookie':setCookie(COOKIE,await signSession(env,result.customer_id))});
+   return finishVerifiedLogin(env,n,token);
   }
   if(method==='POST'&&route==='auth/complete'){
    let token=cookies(request)[PENDING],data=await request.json();if(!token)return err('Please verify your phone again',401);
