@@ -43,9 +43,9 @@ $('adminUnlockForm').onsubmit=async e=>{e.preventDefault();const id=$('adminAcce
 $('adminSignOut').onclick=async()=>{try{await post('logout',{})}finally{lockView();notice('Admin session locked.')}};
 $('adminMoreUsers').onclick=()=>loadTable('users',true).catch(e=>notice(e.message,true));
 $('adminMorePayments').onclick=()=>loadTable('payments',true).catch(e=>notice(e.message,true));
-$('adminCreateCode').onsubmit=async e=>{e.preventDefault();const btn=e.currentTarget.querySelector('button[type=submit]');btn.disabled=true;
+$('adminCreateCode').onsubmit=async e=>{e.preventDefault();const form=e.currentTarget;const btn=form.querySelector('button[type=submit]');btn.disabled=true;
  try{const body={label:$('codeLabel').value.trim(),credits:Number($('codeCredits').value),maxUses:Number($('codeMaxUses').value),expiresDays:Number($('codeDays').value)};
-  const reply=await post('codes',body);$('newCodeValue').textContent=reply.code;show($('adminNewCode'),true);e.currentTarget.reset();await loadAdmin();notice('New redeem code created. Copy it now.');
+  const reply=await post('codes',body);$('newCodeValue').textContent=reply.code;show($('adminNewCode'),true);form.reset();await loadAdmin();notice('New redeem code created. Copy it now.');
  }catch(e){notice(e.message,true)}finally{btn.disabled=false}
 };
 $('copyAdminCode').onclick=()=>navigator.clipboard?.writeText($('newCodeValue').textContent).catch(()=>notice('Select and copy the code manually.',true));
