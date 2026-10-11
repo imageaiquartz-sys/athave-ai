@@ -98,6 +98,15 @@ After uploading, sign in and open `https://athave-ai.pages.dev/api/ai/check` to 
 - In Cloudflare > Workers & Pages > athave-ai > Settings > Variables and secrets, add **Secret** `ADMIN_ACCESS_ID` with value **`Tefter`** (case-sensitive). Save for Production and redeploy.
 - Visit `/admin/` while signed in with the customer phone you marked `is_admin=true` in Supabase. You'll see an **Admin ID** field (no password field); enter `Tefter`. A server-signed HttpOnly unlock cookie is valid for 12 hours and tied to that OTP session. Ordinary users cannot unlock.
 - Updated site retains all the prior endpoints and tables. **No new SQL migration is needed for V5.**
-- The homepage uses `public/assets/athave-hero-opaque.webp` (solid white composite with correct product overlap), and the transparent logo has added spacing between the unicorn and Athave AI name.
+- V6 restores the two original catalogue photos as independent, normal HTML images (`athave-shirt.webp` and `athave-earbuds.webp`). No image eraser, masking, transparent composite or multiply blending is used. The transparent logo is rebuilt from the original unbroken wordmark, with the new gap **only** between the unicorn and the full name.
 - Creator has a larger wallet limit card and more margin above and below it.
 - Remove old V4 and V3 frontend files by replacing the repository contents with this whole folder. Do not delete existing Cloudflare secrets or Supabase data.
+
+
+## V6 quick correction — header logo and hero image
+
+- Fixed the V5 wordmark bug that inserted a gap between `At` and `haveAI`. **`AthaveAI` is intact.** The space appears only between the unicorn icon and the complete brand name.
+- Removed `athave-hero-opaque.webp` and `athave-earbuds-cutout.webp` along with all composite image styles.
+- The homepage uses the **original** white polo and white earbuds image files with normal CSS layering (no masks, transparency changes, pixel erasing or multiply blend).
+- No change to your existing admin ID, OTP, Razorpay, Supabase or Gemini backend code. No new secrets or SQL required.
+- Upload the extracted content to the same `main` GitHub branch and allow Cloudflare Pages to redeploy. Hard refresh Ctrl+Shift+R after deploying to clear cached logo/assets.
