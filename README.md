@@ -1,121 +1,92 @@
-# Athave AI — complete Cloudflare Pages website (no Replit)
+# Athave AI V4 — one-time top-ups + secure admin + redeem codes
 
-**Ready to upload to your EXISTING GitHub repository**. This version follows the provided white/minimal multi-page design. It preserves your existing Supabase database and MSG91 authentication flow. Generated product views, OTP delivery, and actual Razorpay transactions still need LIVE tests after deployment; the code has been syntax/integration tested locally with mocks, not with your real credentials.
+**No Replit, VS Code, or Node hosting required.** This update replaces V3 in your existing GitHub-linked Cloudflare Pages project. It retains existing Supabase customers, OTP login, Razorpay gateway, image uploads, private history, Gemini API integration and current Cloudflare secrets. **Do not delete the Supabase database or run `sql/setup.sql` again on your live project.**
 
-## 1. Update GitHub
+## IMPORTANT: Database migration FIRST
 
-1. Extract the ZIP. **Upload the folder contents, not the ZIP file.**
-2. In your existing GitHub `athave-ai` repository, on `main`, upload/replace `public/`, `functions/`, `sql/`, and the `README.md`.
-3. Commit to `main`, keep your existing Cloudflare Pages integration.
-4. Confirm **Cloudflare Pages → Deployments → Success**. Production build settings:
-   - Framework: None
-   - Build command: `exit 0`
-   - Build output directory: `public`
-   - Root directory: repository root (`/`)
-5. Use your existing `https://athave-ai.pages.dev/` domain. The old OTP, data and payment configuration stay in Cloudflare and Supabase, not GitHub.
+Before uploading V4 to GitHub:
 
-**Important:** The repository must have `functions/api/[[path]].js` at root and `public/index.html` in the `public` folder. If Github adds an extra enclosing folder, move its content up to the root.
+1. Open **Supabase → StudioWhite → SQL Editor → New query**.
+2. Copy and **Run `sql/v4_admin_redeem_topups.sql`**. This safely updates the payment plan constraint and creates secure redeem-code tables and RPCs. It does not remove existing customer or payment records, and it keeps RLS enabled.
+3. **Make your own verified mobile account an admin.** You must already have logged in via OTP and completed your name. Run this with YOUR number, including `91`:
 
-## 2. Connect Google AI Studio FIRST
+   ```sql
+   UPDATE public.customers SET is_admin = true
+   WHERE phone = '91YOUR10DIGITNUMBER';
+   ```
 
-1. Open https://aistudio.google.com/api-keys using the Google account associated with the Gemini API billing project.
-2. Create/copy an API key. Make sure that the project has API billing/positive credit balance and access to the selected image model.
-3. In **Cloudflare → Workers & Pages → athave-ai → Settings → Variables and Secrets → Production** add:
+   Check the result:
 
-| Name | Type | Value |
-|---|---|---|
-| `GEMINI_API_KEY` | **Secret** | Your Google AI Studio API key |
-| `GEMINI_IMAGE_MODEL` | Text | `gemini-3.1-flash-lite-image` |
-| `ANALYSIS_MODEL` | Text | `gemini-3.5-flash-lite` |
-| `GENERATION_ENABLED` | Text | `false` (until live testing) |
-| `AI_MONTHLY_CALL_CAP` | Text | `20` (low initial safety cap) |
-| `MAX_GENERATIONS_PER_DAY` | Text | `5` (initial user safety cap) |
+   ```sql
+   SELECT phone, name, is_admin FROM public.customers
+   WHERE phone = '91YOUR10DIGITNUMBER';
+   ```
 
-4. Save and redeploy your production Cloudflare Pages deployment to apply changes.
-5. Sign into Athave AI with a real OTP, then open **`https://athave-ai.pages.dev/api/ai/check`** in the same browser. Expect `configured:true, accessible:true`. This checks key/model *metadata access only*; it cannot guarantee paid image generation will succeed. It does not create an image.
-6. Start with **manual product type** if image analysis gives an error. This skips the additional product-detection model call and is usually cheaper.
-7. Once all tests pass, set `GENERATION_ENABLED` to `true`, deploy configuration, and run **ONE real paid image test** with enough credits.
+   Expected `is_admin = true`. Never omit `WHERE`, or you could make every account an admin.
+4. Log out and sign back in if necessary, or refresh `/profile/`. The **Admin** badge will appear in the header and the **Admin dashboard** card will appear in Profile. Visit `/admin/`.
 
-Google image-output pricing depends on the chosen model and may change: https://ai.google.dev/gemini-api/docs/pricing. A 1024px output is not automatically profitable simply because your user paid ₹499. You must count separate front/back image requests, any paid analysis, failed upstream calls, payment fees and tax. If the output has a complex pattern, WebP may not be very small.
+**Security:** the admin backend checks `customers.is_admin` for EVERY admin request. Hiding the badge is only a UX feature; it does not confer permissions. Redeem codes are server-generated from crypto randomness and stored in the database as SHA-256 hashes. Redemption is a transaction with database row locking, a maximum-uses counter and a unique per-customer redemption constraint. The code is shown only once at creation. The admin can disable any active code from the dashboard.
 
-## 3. Existing Supabase + MSG91 (DO NOT wipe data)
+## Deploy on the current GitHub and Cloudflare Pages
 
-You've already run the initial SQL and fixed service-role table privileges. **Do not rerun SQL to reset your live database.** Reuse your current:
+1. Extract the ZIP, upload **its contents** (not the ZIP itself) over your existing `athave-ai` repository on `main`: `public`, `functions`, `sql`, and `README.md`.
+2. Commit changes and wait for **Cloudflare Pages → Deployments → Success**.
+3. Keep Cloudflare build settings: Framework `None`, Build command `exit 0`, output directory `public`, root directory repository root.
+4. Keep all your existing Supabase, MSG91 and Razorpay variables unchanged. Normally, no new Cloudflare variables are needed for admin and redeem-code features.
+5. On mobile, refresh the deployed site (or open an incognito tab if stale assets appear).
 
-| Cloudflare variable | Type | Notes |
-|---|---|---|
-| `SUPABASE_URL` | Text | `https://PROJECT-ID.supabase.co` only (not `/rest/v1/`) |
-| `SUPABASE_SERVICE_ROLE_KEY` | Secret | Server-side only |
-| `MSG91_WIDGET_ID` | Text | Your existing Widget ID |
-| `MSG91_AUTH_KEY` | Secret | Your server-side MSG91 auth key |
-| `SESSION_SECRET` | Secret | Your existing long random value **do not change casually**, it signs user sessions |
+## Pages
 
-`MSG91_WIDGET_TOKEN` may remain stored but is **not used** in this backend's CAPTCHA-free server OTP flow. Keep actual SMS provider account limits and validation active. This project uses server-issued secure HttpOnly session cookies; no frontend API secrets.
+- `/` — home with **only the white polo and earbuds**, no sneaker; no upload box on homepage.
+- `/create/` — **one product image** and optional second reference, automatic product detection; no product-type selector or explanatory garment message.
+- `/results/` — separate high-quality product images and downloadable 1024×1024 WebP files; Download all ZIP.
+- `/profile/` — identity, wallet, **Redeem a code**, activity links and **Admin dashboard link only for admins**.
+- `/admin/` — totals, customers, paid/pending top-ups, create/disable redeem codes.
+- `/profile/history/`, `/profile/payments/` and About / Terms / Privacy / Refunds / Contact / How.
 
-Supabase Storage must have your **private `athave-results`** bucket. `sql/setup.sql` and `sql/otp_rate_limit_patch.sql` are reference/setup files for empty projects only. Your successful permissions patch should already be in effect.
+## Pricing: ONE-TIME TOP-UPS ONLY
 
-## 4. Payments
+- **₹499** top-up → **30 image credits**.
+- **₹999** top-up → **60 image credits**.
+- **Custom ₹100–₹10,000** → `floor(amount × 30 / 500)` credits.
+- The former ₹299 checkout option is **removed**. Historical ₹299 payments are preserved in payment history.
+- No subscriptions, recurring deductions or automatic renewals. Credits are granted **only after captured Razorpay payments verified server-side**, or through a valid redeem code. One generated output consumes one credit. Generation failures normally refund reserved credits.
 
-The frontend offers:
+## AI generation
 
-- ₹499 Starter (30 image credits)
-- ₹299 Top-up (18 image credits)
-- ₹100–₹10,000 custom top-ups (`floor(amount * 30 / 500)` credits)
+Set Cloudflare Production variables:
 
-Payment order creation and captured-payment signature verification occur in the Cloudflare backend. A successful payment credits the wallet **only once** through Supabase RPC. Credits are deducted per requested output (front and back each cost one credit); failed jobs are refunded via the database function.
+| Variable | Suggested value |
+|---|---|
+| `GEMINI_API_KEY` | Your funded Google AI Studio key (**Secret**) |
+| `GEMINI_IMAGE_MODEL` | `gemini-3.1-flash-lite-image` |
+| `ANALYSIS_MODEL` | `gemini-3.5-flash-lite` |
+| `GENERATION_ENABLED` | `false` until ready to test, then `true` |
+| `AI_MONTHLY_CALL_CAP` | `20` during the first test |
+| `MAX_GENERATIONS_PER_DAY` | `5` during the first test |
 
-For test payments add Cloudflare secrets:
+These are **existing app variables**, not required for the admin setup. Leave payments in Razorpay Test Mode until verified. Google AI model names and prices may change: check https://ai.google.dev/gemini-api/docs/models and https://ai.google.dev/gemini-api/docs/pricing.
 
-- `RAZORPAY_KEY_ID` (Text)
-- `RAZORPAY_KEY_SECRET` (Secret)
-- `RAZORPAY_WEBHOOK_SECRET` (Secret)
+After uploading, sign in and open `https://athave-ai.pages.dev/api/ai/check` to check key/model metadata. This does NOT verify a paid image generation; you must run one actual test with at least one credit. WebP optimization happens in the browser on download, up to a few hundred KB where feasible; complex pictures may require more KB. AI-inferred unseen garment details may not match the actual product.
 
-Configure Razorpay webhook URL: `https://athave-ai.pages.dev/api/webhooks/razorpay` for the `payment.captured` event. Use the exact same webhook signing secret in both Razorpay and Cloudflare. Verify test capture and top-up before enabling real payments. Do not switch Test→Live credentials without merchant approval.
+## End-to-end checklist
 
-## 5. Pages and behavior
+- [ ] SQL V4 migration successfully completed, admin account set correctly
+- [ ] Cloudflare production deployment successful
+- [ ] Homepage contains **two** product images (polo + earbuds)
+- [ ] `/create/` shows no product dropdown or descriptive garment note
+- [ ] Existing phone OTP and account persist when navigating between pages
+- [ ] Admin badge only for a database admin
+- [ ] Non-admin `/api/admin/overview` returns HTTP 403
+- [ ] Admin dashboard loads customers, Razorpay top-ups and summary
+- [ ] Admin creates a test code with 2 image credits and max uses 1
+- [ ] Customer redeems it once and wallet balance increases by 2
+- [ ] Second redemption fails; admin disables another unused code
+- [ ] Test ₹499 and ₹999 orders in Razorpay Test Mode, including duplicate webhook delivery
+- [ ] Run one real AI image generation and download white-backed 1024×1024 WebP
 
-- `/` – homepage, sample white polo + earbuds + white sneaker. No upload box. No Get Started header button.
-- `/create/` – front photo required; back photo optional; optional manual product type; generate via Cloudflare API.
-- `/results/` – separate downloadable outputs, each exported by the browser to white-backed 1024×1024 WebP, and "Download all as ZIP".
-- `/profile/` – identity, image limit, progress, vertical links to history/payments/legal/personal website and developer.
-- `/profile/history/`, `/profile/payments/` – account activity and downloads.
-- `/about/`, `/terms/`, `/privacy/`, `/refunds/`, `/contact/`, `/how/` – standalone pages.
+## Existing backend secrets (unchanged)
 
-Header back arrow returns to the previous same-origin page or sensible fallback. While the login modal is open, mobile/browser **Back dismisses the modal first**. User sessions persist through navigation/reload via secure server cookies; the site re-fetches Supabase account state and won't turn a temporary server failure into forced OTP login.
+`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `MSG91_WIDGET_ID`, `MSG91_AUTH_KEY`, `SESSION_SECRET`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`.
 
-For **a single garment front photo**, the AI attempts two separate front/back images; the unseen back is **inferred**, not guaranteed to match. For front+back photos, it uses both references. For shoes and other non-garments it normally makes one catalogue image. AI may alter tiny features, prints and logos; review outputs before listing them.
-
-## 6. Before accepting actual customers
-
-- Test real OTP → new account name → profile → reload → returning user login.
-- Test manual polo generation and one pair of front/back garment photos with a safe, small monthly cap.
-- Make sure `/api/ai/check` reports `accessible:true`.
-- Test actual WebP downloads, same-origin session and private Supabase Storage.
-- Test Razorpay sandbox payment capture and wallet credit exactly once.
-- Add real customer service email, phone, merchant address and service response policy in `public/contact/index.html`. Current contact page deliberately contains no invented support address.
-- Review/update all legal pages for your actual refund rules and applicable laws; these are drafts and not legal advice.
-- Optionally edit founder personal site URL in `public/profile/index.html` and `public/about/index.html` if it changes.
-
-## File structure
-
-```
-public/
-  index.html                       Home
-  create/index.html               Upload and Generate
-  results/index.html              Results and WebP downloads
-  profile/index.html              Account overview and links
-  profile/history/index.html      Image history
-  profile/payments/index.html     Payment history
-  how/index.html                  How it works
-  about/index.html                Founder and developer
-  terms/index.html                Legal terms
-  privacy/index.html              Privacy
-  refunds/index.html              Refunds
-  contact/index.html              Support contact
-  styles.css                      Responsive white styling
-  app.js                          Unified interactive client
-  assets/                         Transparent logo, polo, earbuds, sneaker
-functions/api/[[path]].js          Cloudflare Pages backend
-sql/                               Existing schema and OTP safety SQL (reference)
-README.md
-```
+**Note:** Real Supabase, MSG91, Razorpay and Gemini connections were not exercised in this local packaging environment. Your payment and refund policy is a draft that should be reviewed against your actual business terms before launching live payments.

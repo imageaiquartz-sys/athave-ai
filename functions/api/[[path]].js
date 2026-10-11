@@ -221,13 +221,13 @@ export async function onRequest({request,env,params}){
      return json({outputs:(GARMENTS.has(manualKind)?['front','back']:['catalogue']).map(side=>({kind:manualKind,side,inferred:side==='back'&&images.length<2}))});
    }
    const prompt=`Analyze these product reference photos for a catalogue photo service. Return compact JSON only: {"items":[{"kind":"shirt|polo shirt|t-shirt|hoodie|jacket|dress|pants|jeans|shorts|skirt|cap|shoe|bag|product","isGarment":true|false}]}. Identify DISTINCT product types. If a person wears both shirt and pants return both (up to two). Treat multiple reference views of the same object as one item. Clothing and caps are garments that need separate front and back images. Shoes/bags/other objects need one professional catalogue image. Do not include people as items. Never invent products that are absent. Max 2 items.`;
-   let result;try{let parts=await gemini(env,[{text:prompt},...images],env.ANALYSIS_MODEL||'gemini-3.5-flash-lite',{responseMimeType:'application/json'});result=JSON.parse(parts.find(x=>x.text)?.text||'{}')}catch(e){throw Error('Product detection failed: '+String(e.message).slice(0,95)+'. Select the product type manually or check ANALYSIS_MODEL.')}
+   let result;try{let parts=await gemini(env,[{text:prompt},...images],env.ANALYSIS_MODEL||'gemini-3.5-flash-lite',{responseMimeType:'application/json'});result=JSON.parse(parts.find(x=>x.text)?.text||'{}')}catch(e){throw Error('Product detection failed: '+String(e.message).slice(0,115)+'. Check ANALYSIS_MODEL and try again.')}
    let items=(Array.isArray(result.items)?result.items:[]).slice(0,2).filter(x=>ALLOWED_KINDS.has(x.kind));if(!items.length)items=[{kind:'product'}];
    let outputs=[];for(let item of items){let garment=GARMENTS.has(item.kind);for(let side of (garment?['front','back']:['catalogue']))outputs.push({kind:item.kind,side,inferred:side==='back'&&images.length<2})}
    return json({outputs:outputs.slice(0,4)});
   }
   if(method==='POST'&&route==='generate'){
-   if(env.GENERATION_ENABLED==='false')return err('Image generation temporarily paused',503);
+   if(env.GENERATION_ENABLED!=='true')return err('Image generation temporarily paused until the owner enables it',503);
    let body=await request.json(),images=validateInputImages(body.images);
    const kind=String(body.kind||'product').toLowerCase(),side=String(body.side||'catalogue');
    if(!ALLOWED_KINDS.has(kind)||!['front','back','catalogue'].includes(side)||(!GARMENTS.has(kind)&&side!=='catalogue'))return err('Invalid image request');
@@ -266,10 +266,10 @@ export async function onRequest({request,env,params}){
     return json({ok:true});
   }
   if(method==='POST'&&route==='payments/order'){
-    let d=await request.json(),plan=String(d.plan||'');if(!['starter','topup','custom'].includes(plan))return err('Invalid plan');
-    let amount=plan==='starter'?499:plan==='topup'?299:Number(d.amount);
+    let d=await request.json(),plan=String(d.plan||'');if(!['starter','premium','custom'].includes(plan))return err('Invalid plan');
+    let amount=plan==='starter'?499:plan==='premium'?999:Number(d.amount);
     if(!Number.isInteger(amount)||amount<100||amount>10000)return err('Custom amount must be ₹100–₹10,000');
-    let credits=plan==='starter'?30:plan==='topup'?18:rup(amount);if(credits<1)return err('Amount too low');
+    let credits=plan==='starter'?30:plan==='premium'?60:rup(amount);if(credits<1)return err('Amount too low');
     const order=await secureGateway(env,'POST','orders',{amount:amount*100,currency:'INR',receipt:crypto.randomUUID().replace(/-/g,'').slice(0,32)});
     await tbl(env,'POST','payments','',{customer_id:user.id,plan,amount_paise:amount*100,credits,gateway_order_id:order.id},{headers:{prefer:'return=minimal'}});
     return json({orderId:order.id,amount:amount*100,keyId:env.RAZORPAY_KEY_ID});
@@ -281,6 +281,52 @@ export async function onRequest({request,env,params}){
     if(!rows?.[0])return err('Not your payment',403);
     const mac=await hmacHex(env.RAZORPAY_KEY_SECRET,oid+'|'+pid);if(sig!==mac)return err('Payment signature mismatch',403);
     await fulfill(env,oid,pid);return json({paid:true});
+  }
+  if(method==='POST'&&route==='redeem'){
+    let data=await request.json(),code=String(data.code||'').toUpperCase().trim();
+    if(!/^ATH-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code))return err('Invalid redeem code format');
+    const codeHash=await sha(code);
+    const result=await rpc(env,'redeem_image_code',{p_customer:user.id,p_code_hash:codeHash});
+    return json({redeemed:true,credits:result.credits,balance:result.balance});
+  }
+  if(route.startsWith('admin/')){
+    if(!user.is_admin)return err('Admins only',403);
+    if(method==='GET'&&route==='admin/overview'){
+      const result=await rpc(env,'admin_dashboard_totals',{});
+      return json(result);
+    }
+    if(method==='GET'&&(route==='admin/users'||route==='admin/payments')){
+      const offsetRaw=Number(new URL(request.url).searchParams.get('offset')||0);
+      if(!Number.isSafeInteger(offsetRaw)||offsetRaw<0||offsetRaw>1000000)return err('Invalid pagination offset');
+      const isUser=route==='admin/users';
+      const list=isUser?await tbl(env,'GET','customers',`?select=id,phone,name,created_at&order=created_at.desc&limit=50&offset=${offsetRaw}`):await tbl(env,'GET','payments',`?select=id,customer_id,plan,amount_paise,credits,status,created_at,gateway_order_id&order=created_at.desc&limit=50&offset=${offsetRaw}`);
+      if(isUser&&list.length){
+        const ids=list.map(x=>x.id).join(',');
+        const wallets=await tbl(env,'GET','wallets',`?select=customer_id,balance,used&customer_id=in.(${ids})`);
+        const byId=new Map(wallets.map(w=>[w.customer_id,w]));
+        return json({items:list.map(x=>({...x,balance:byId.get(x.id)?.balance??0,used:byId.get(x.id)?.used??0}))});
+      }
+      return json({items:list});
+    }
+    if(method==='GET'&&route==='admin/codes'){
+      const codes=await tbl(env,'GET','redeem_codes','?select=id,label,credits,uses,max_uses,active,expires_at,created_at&order=created_at.desc&limit=100');
+      return json({items:codes});
+    }
+    if(method==='POST'&&route==='admin/codes/disable'){
+      const data=await request.json();const id=String(data.id||'');
+      if(!/^[0-9a-f-]{36}$/i.test(id))return err('Invalid code ID');
+      await tbl(env,'PATCH','redeem_codes',`?id=eq.${encodeURIComponent(id)}`,{active:false},{headers:{prefer:'return=minimal'}});
+      return json({disabled:true});
+    }
+    if(method==='POST'&&route==='admin/codes'){
+      const d=await request.json();const label=String(d.label||'').trim(),credits=Number(d.credits),maxUses=Number(d.maxUses),expiresDays=Number(d.expiresDays);
+      if(label.length<2||label.length>70||!Number.isInteger(credits)||credits<1||credits>10000||!Number.isInteger(maxUses)||maxUses<1||maxUses>10000||!Number.isInteger(expiresDays)||expiresDays<1||expiresDays>365)return err('Enter valid label, credits, uses and expiry (1–365 days)');
+      const parts=[];for(let i=0;i<3;i++){const bytes=crypto.getRandomValues(new Uint8Array(4));parts.push([...bytes].map(x=>'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[x%32]).join(''))}
+      const code='ATH-'+parts.join('-');const codeHash=await sha(code);
+      const expiry=new Date(Date.now()+expiresDays*86400000).toISOString();
+      await tbl(env,'POST','redeem_codes','',{code_hash:codeHash,label,credits,max_uses:maxUses,expires_at:expiry,created_by:user.id},{headers:{prefer:'return=minimal'}});
+      return json({created:true,code,credits,maxUses,expires_at:expiry});
+    }
   }
   if(method==='GET'&&route==='admin'){
     if(!user.is_admin)return err('Admins only',403);
