@@ -1,5 +1,5 @@
 /* Athave AI Cloudflare Pages Function. All secrets live in Pages > Settings > Variables & Secrets. */
-const COOKIE='athave_session', PENDING='athave_pending', OTP_COOKIE='athave_otp_request', BUCKET='athave-results';
+const COOKIE='athave_session', PENDING='athave_pending', OTP_COOKIE='athave_otp_request', ADMIN_COOKIE='athave_admin_unlock', BUCKET='athave-results';
 const ALLOWED_KINDS=new Set(['shirt','polo shirt','t-shirt','hoodie','jacket','dress','pants','jeans','shorts','skirt','cap','shoe','bag','product']);
 const GARMENTS=new Set(['shirt','polo shirt','t-shirt','hoodie','jacket','dress','pants','jeans','shorts','skirt','cap']);
 const enc=new TextEncoder();
@@ -14,6 +14,23 @@ async function signSession(env,id){let payload=b64url(enc.encode(JSON.stringify(
 async function readSession(req,env){const token=cookies(req)[COOKIE];if(!token||!env.SESSION_SECRET)return null;let parts=token.split('.');if(parts.length!==2)return null;const expected=await hmac(env.SESSION_SECRET,parts[0]);if(expected!==parts[1])return null;try{let p=JSON.parse(new TextDecoder().decode(unb64url(parts[0])));if(p.exp<=Date.now()||!p.id)return null;return p.id}catch{return null}}
 function setCookie(name,value,age=1209600){return `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${age}; HttpOnly; Secure; SameSite=Lax`}
 function clearCookie(name){return `${name}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`}
+// Admin ID is a second unlock step, never a substitute for an authenticated admin user.
+// Keep ADMIN_ACCESS_ID in Cloudflare Secrets rather than in public JavaScript.
+async function adminGrant(env, userId, sessionToken){
+ const payload=b64url(enc.encode(JSON.stringify({id:userId,s:await sha(sessionToken),exp:Date.now()+12*3600*1000})));
+ return payload+'.'+await hmac(env.SESSION_SECRET,payload);
+}
+async function hasAdminGrant(req,env,user){
+ if(!user?.is_admin||!env.SESSION_SECRET)return false;
+ const auth=cookies(req)[COOKIE],token=cookies(req)[ADMIN_COOKIE];
+ if(!auth||!token)return false;
+ const [payload,mac,...extra]=token.split('.');if(!payload||!mac||extra.length)return false;
+ if(await hmac(env.SESSION_SECRET,payload)!==mac)return false;
+ try{
+  const details=JSON.parse(new TextDecoder().decode(unb64url(payload)));
+  return details.id===user.id && details.s===await sha(auth) && details.exp>Date.now();
+ }catch{return false}
+}
 function phone(raw){let n=String(raw||'').replace(/\D/g,'');if(n.length===10)n='91'+n;return /^91[6-9][0-9]{9}$/.test(n)?n:null}
 
 // CAPTCHA-free OTP widget API. OTP requests are server-side, capped in Supabase,
@@ -171,6 +188,7 @@ export async function onRequest({request,env,params}){
    if(!jwt)throw Error('MSG91 returned no access token after OTP verification. Check MSG91 Widget logs.');
    const login=await finishVerifiedLogin(env,challenge.p,jwt);
    login.headers.append('set-cookie',clearCookie(OTP_COOKIE));
+   login.headers.append('set-cookie',clearCookie(ADMIN_COOKIE));
    return login;
   }
   if(method==='POST'&&route==='auth/verify'){
@@ -182,7 +200,7 @@ export async function onRequest({request,env,params}){
    let token=cookies(request)[PENDING],data=await request.json();if(!token)return err('Please verify your phone again',401);
    let name=String(data.name||'').trim();if(name.length<1||name.length>80)return err('Enter your name (1–80 characters)');
    const id=await rpc(env,'complete_phone_signup',{p_claim_digest:await sha(token),p_name:name});
-   const reply=json({signedIn:true});reply.headers.append('set-cookie',setCookie(COOKIE,await signSession(env,id)));reply.headers.append('set-cookie',clearCookie(PENDING));return reply;
+   const reply=json({signedIn:true});reply.headers.append('set-cookie',setCookie(COOKIE,await signSession(env,id)));reply.headers.append('set-cookie',clearCookie(PENDING));reply.headers.append('set-cookie',clearCookie(ADMIN_COOKIE));return reply;
   }
   if(method==='GET'&&route==='auth/session'){
     const user=await current(request,env);
@@ -193,9 +211,33 @@ export async function onRequest({request,env,params}){
     response.headers.append('set-cookie',clearCookie(COOKIE));
     response.headers.append('set-cookie',clearCookie(PENDING));
     response.headers.append('set-cookie',clearCookie(OTP_COOKIE));
+    response.headers.append('set-cookie',clearCookie(ADMIN_COOKIE));
     return response;
   }
   const user=await current(request,env);if(!user)return err('Please log in with your mobile number',401);
+  if(method==='GET'&&route==='admin/status'){
+    if(!user.is_admin)return err('Admins only',403);
+    return json({authorized:true,unlocked:await hasAdminGrant(request,env,user),configured:!!env.ADMIN_ACCESS_ID});
+  }
+  if(method==='POST'&&route==='admin/unlock'){
+    if(!user.is_admin)return err('Admins only',403);
+    if(!env.ADMIN_ACCESS_ID)return err('Admin ID is not configured in Cloudflare Secrets',503);
+    const body=await request.json(),candidate=String(body.id||'');
+    if(candidate.length<1||candidate.length>80)return err('Enter an admin ID');
+    // Constant-time fixed-length hashes to avoid leaking how much of the ID matches.
+    const good=enc.encode(await sha(env.ADMIN_ACCESS_ID));
+    const got=enc.encode(await sha(candidate));
+    let difference=0;for(let i=0;i<good.length;i++)difference|=good[i]^got[i];
+    if(difference!==0)return err('Incorrect admin ID',403);
+    const token=await adminGrant(env,user.id,cookies(request)[COOKIE]);
+    return json({unlocked:true},200,{'set-cookie':setCookie(ADMIN_COOKIE,token,12*3600)});
+  }
+  if(method==='POST'&&route==='admin/lock'){
+    if(!user.is_admin)return err('Admins only',403);
+    return json({locked:true},200,{'set-cookie':clearCookie(ADMIN_COOKIE)});
+  }
+  if((route.startsWith('admin/')||route==='admin')&&!await hasAdminGrant(request,env,user))
+    return err('Unlock admin dashboard with your admin ID',403);
   if(method==='GET'&&route==='ai/check'){
    if(!env.GEMINI_API_KEY)return json({configured:false,model:env.GEMINI_IMAGE_MODEL||'gemini-3.1-flash-lite-image',message:'GEMINI_API_KEY is missing'});
    const model=env.GEMINI_IMAGE_MODEL||'gemini-3.1-flash-lite-image';

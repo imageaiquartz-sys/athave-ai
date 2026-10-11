@@ -90,3 +90,14 @@ After uploading, sign in and open `https://athave-ai.pages.dev/api/ai/check` to 
 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `MSG91_WIDGET_ID`, `MSG91_AUTH_KEY`, `SESSION_SECRET`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`.
 
 **Note:** Real Supabase, MSG91, Razorpay and Gemini connections were not exercised in this local packaging environment. Your payment and refund policy is a draft that should be reviewed against your actual business terms before launching live payments.
+
+
+## V5 update: admin ID, spacing, opaque homepage photography
+
+- Existing mobile OTP verification and Supabase `is_admin` remain essential. The admin ID is **not** a way for arbitrary visitors to become admins.
+- In Cloudflare > Workers & Pages > athave-ai > Settings > Variables and secrets, add **Secret** `ADMIN_ACCESS_ID` with value **`Tefter`** (case-sensitive). Save for Production and redeploy.
+- Visit `/admin/` while signed in with the customer phone you marked `is_admin=true` in Supabase. You'll see an **Admin ID** field (no password field); enter `Tefter`. A server-signed HttpOnly unlock cookie is valid for 12 hours and tied to that OTP session. Ordinary users cannot unlock.
+- Updated site retains all the prior endpoints and tables. **No new SQL migration is needed for V5.**
+- The homepage uses `public/assets/athave-hero-opaque.webp` (solid white composite with correct product overlap), and the transparent logo has added spacing between the unicorn and Athave AI name.
+- Creator has a larger wallet limit card and more margin above and below it.
+- Remove old V4 and V3 frontend files by replacing the repository contents with this whole folder. Do not delete existing Cloudflare secrets or Supabase data.

@@ -102,6 +102,7 @@ async function loginSuccess() {
   toast('Signed in successfully. Welcome to Athave AI!');
   let callback=postLoginAction;postLoginAction=null;
   if (callback) await callback();
+  else if(page==='admin') await loadAdmin();
   else if(page==='profile'||page==='history'||page==='payments') renderUser();
  } catch (e) {
   authStatus('OTP was accepted but the account session did not load: ' + e.message, true);
@@ -294,8 +295,13 @@ async function adminLoadList(kind,more=false){const isUser=kind==='users';let of
  const btn=$(isUser?'adminMoreUsers':'adminMorePayments');if(btn)btn.hidden=rows.length<50;
 }
 async function loadAdmin(){
- if(!me?.user?.isAdmin){adminStatus('Admin access is restricted to authorized accounts.',true);show($('adminDashboard'),false);return;}
- show($('adminDashboard'),true);adminStatus('Loading…');
+ if(!me?.user?.isAdmin){adminStatus('Admin access is restricted to authorized accounts.',true);show($('adminDashboard'),false);show($('adminUnlockPanel'),false);return;}
+ let state;
+ try{state=await api('admin/status');}
+ catch(e){adminStatus('Admin authorization check failed: '+e.message,true);show($('adminDashboard'),false);show($('adminUnlockPanel'),false);return;}
+ if(!state.configured){adminStatus('Add ADMIN_ACCESS_ID to Cloudflare Production Secrets before unlocking admin.',true);show($('adminDashboard'),false);show($('adminUnlockPanel'),true);return;}
+ if(!state.unlocked){show($('adminUnlockPanel'),true);show($('adminDashboard'),false);adminStatus('');return;}
+ show($('adminUnlockPanel'),false);show($('adminDashboard'),true);adminStatus('Loading…');
  try{const [stats,codes]=await Promise.all([api('admin/overview'),api('admin/codes')]);
   $('adminTotalUsers').textContent=stats.users??0;$('adminRevenue').textContent='₹'+(Number(stats.revenue_paise||0)/100).toLocaleString('en-IN');
   $('adminTopups').textContent=stats.paid_orders??0;$('adminRedemptions').textContent=stats.redemptions??0;
@@ -312,6 +318,16 @@ async function loadAdmin(){
   await Promise.all([adminLoadList('users'),adminLoadList('payments')]);adminStatus('');
  }catch(e){adminStatus('Admin dashboard failed to load: '+e.message,true)}
 }
+if($('adminUnlockForm'))$('adminUnlockForm').onsubmit=async event=>{
+ event.preventDefault();const button=event.currentTarget.querySelector('button[type=submit]');
+ const id=$('adminAccessId').value.trim();if(!id){$('adminUnlockMessage').textContent='Enter your admin ID.';return}
+ button.disabled=true;$('adminUnlockMessage').textContent='Checking admin ID…';
+ try{
+  await post('admin/unlock',{id});$('adminAccessId').value='';$('adminUnlockMessage').textContent='';
+  await loadAdmin();
+ }catch(e){$('adminUnlockMessage').textContent=e.message;toast(e.message,true)}
+ finally{button.disabled=false}
+};
 if($('adminMoreUsers'))$('adminMoreUsers').onclick=()=>adminLoadList('users',true).catch(e=>adminStatus(e.message,true));
 if($('adminMorePayments'))$('adminMorePayments').onclick=()=>adminLoadList('payments',true).catch(e=>adminStatus(e.message,true));
 if($('adminCreateCode'))$('adminCreateCode').onsubmit=async event=>{

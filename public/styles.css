@@ -29,3 +29,42 @@
 @media(max-width:730px){.hero-visual{height:380px;min-height:0}.hero-shirt{height:85%;width:73%;top:0;left:-7%}.hero-earbud{height:70%;width:72%;left:32%;top:31%}.hero{padding-bottom:12px}.admin-container{width:calc(100% - 32px);padding:32px 0 60px}.admin-summary{gap:9px}.admin-stat{padding:16px}.admin-card{padding:16px}.admin-form{grid-template-columns:1fr}.admin-form label:first-child,.admin-form button{grid-column:auto}.redeem-form{flex-direction:column}.redeem-form button{width:100%}.admin-head h1{font-size:37px}}
 
 .admin-disable{border:1px solid #e0e3e9;background:white;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700}.admin-disable:hover{background:#f5f6f8}
+
+/* V5: brand breathing room, opaque hero and cleaner creator layout */
+.brand img{width:198px;height:69px;object-fit:contain}
+.modal-brand{width:198px;height:83px}
+.product-stage{position:absolute;inset:0;overflow:hidden;display:grid;place-items:center;background:#fff}
+.product-stage img.hero-composite{position:relative!important;display:block;width:100%;height:100%;max-width:100%;object-fit:contain!important;mix-blend-mode:normal!important;opacity:1!important;filter:none;z-index:1}
+.generator-bottom{margin-top:52px;max-width:620px;display:flex;flex-direction:column;gap:28px}
+.generator-bottom .wallet-mini{margin:0;min-height:68px;padding:16px 22px;border:1px solid #eaedf1;background:#fafbfc;border-radius:14px;display:flex;align-items:center;justify-content:center;column-gap:17px;row-gap:8px;flex-wrap:wrap;font-size:15px}
+.generator-bottom .wallet-mini b{font-size:19px;font-weight:800;color:#101317}
+.generator-bottom .wallet-mini a{margin-left:12px;display:inline-flex;align-items:center;justify-content:center;padding:9px 17px;text-decoration:none;border-radius:9px;background:#111418;color:#fff;font-weight:700;white-space:nowrap}
+.generator-bottom .wallet-mini a:hover{background:#30343b}
+.generator-bottom .btn{margin:0;min-height:57px}
+/* Preserve links but remove underlines on founder and developer names. */
+.policy-box a[href*="sabithsalahkp.github.io"],
+.policy-box a[href*="quartzwebsolutions.com"],
+.profile-content a[href*="sabithsalahkp.github.io"],
+.profile-content a[href*="quartzwebsolutions.com"],
+.site-footer a[href*="quartzwebsolutions.com"]{text-decoration:none!important;border-bottom:0!important}
+.policy-box a[href*="sabithsalahkp.github.io"]:hover,
+.policy-box a[href*="quartzwebsolutions.com"]:hover{color:#4c5665}
+/* Admin ID unlock; actual authorization occurs in Cloudflare Functions. */
+.admin-unlock-panel{width:min(480px,100%);margin:36px auto 75px;padding:33px;background:white;border:1px solid #e9ebf0;border-radius:22px;box-shadow:0 17px 50px rgba(10,15,25,.04)}
+.admin-unlock-icon{display:grid;place-items:center;width:54px;height:54px;border-radius:16px;background:#f3f5f7;margin:0 0 22px}
+.admin-unlock-icon svg{width:27px;height:27px}
+.admin-unlock-panel h2{font-size:clamp(24px,2.3vw,32px);margin-top:8px}
+.admin-unlock-panel p{font-size:14px;line-height:1.7;margin:12px 0 24px}
+.admin-unlock-panel form{display:grid;gap:14px}
+.admin-unlock-panel label{font-weight:700;font-size:14px}
+.admin-unlock-panel input{text-transform:none;letter-spacing:normal}
+.admin-unlock-panel .page-status{margin:13px 0 0}
+@media(max-width:730px){
+ .brand img{width:163px;height:57px}
+ .hero-visual{height:365px;min-height:0}
+ .product-stage img.hero-composite{object-position:center center}
+ .generator-bottom{margin-top:37px;gap:20px}
+ .generator-bottom .wallet-mini{padding:15px 13px;column-gap:9px;font-size:14px}
+ .generator-bottom .wallet-mini a{margin-left:0}
+ .admin-unlock-panel{padding:24px 20px}
+}
