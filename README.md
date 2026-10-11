@@ -1,96 +1,121 @@
-# Athave AI — GitHub + Cloudflare Pages full website
+# Athave AI — complete Cloudflare Pages website (no Replit)
 
-**Replit is not used or required.** Frontend: HTML/CSS/vanilla JavaScript. Backend: Cloudflare Pages Functions in `/functions/api/[[path]].js`. Database and image storage: Supabase. Phone OTP: MSG91 Widget server APIs. Payments: Razorpay. AI: Google Gemini.
+**Ready to upload to your EXISTING GitHub repository**. This version follows the provided white/minimal multi-page design. It preserves your existing Supabase database and MSG91 authentication flow. Generated product views, OTP delivery, and actual Razorpay transactions still need LIVE tests after deployment; the code has been syntax/integration tested locally with mocks, not with your real credentials.
 
-This repository is an UPDATE for the existing `athave-ai` GitHub/Cloudflare deployment. It contains **all site files**, rather than only changed snippets, so you can replace the previous project code without losing features. The source has been syntax checked and the OTP/account/session endpoints have passed local mocked integration tests. **Live SMS delivery, merchant payments, cloud storage and actual image-generation have not been verified against your accounts** and must be tested before accepting customers.
+## 1. Update GitHub
 
-## Update your existing GitHub project (no Replit)
+1. Extract the ZIP. **Upload the folder contents, not the ZIP file.**
+2. In your existing GitHub `athave-ai` repository, on `main`, upload/replace `public/`, `functions/`, `sql/`, and the `README.md`.
+3. Commit to `main`, keep your existing Cloudflare Pages integration.
+4. Confirm **Cloudflare Pages → Deployments → Success**. Production build settings:
+   - Framework: None
+   - Build command: `exit 0`
+   - Build output directory: `public`
+   - Root directory: repository root (`/`)
+5. Use your existing `https://athave-ai.pages.dev/` domain. The old OTP, data and payment configuration stay in Cloudflare and Supabase, not GitHub.
 
-1. Extract this ZIP on your computer; do **not** upload the ZIP itself as a single repository file.
-2. Open GitHub → your `athave-ai` repository → branch `main` → **Add file → Upload files**.
-3. Upload the **contents** of the extracted folder, keeping `public/`, `functions/`, `sql/`, and `README.md` in the repository root. Choose to replace existing files with the same paths. Existing Cloudflare secrets are not in this ZIP and will not be overwritten.
-4. Commit your changes to `main` and wait for Cloudflare Pages → Deployments → **Success**. The Git connection should trigger a deploy automatically.
-5. In Cloudflare Pages, the build settings should remain `Framework: None`, `Build command: exit 0`, `Output directory: public`, `Root: /`.
-6. If the browser displays an older site, open a fresh private/incognito tab to avoid cached JavaScript. Do not change the Cloudflare project/domain; it can remain `athave-ai.pages.dev`.
+**Important:** The repository must have `functions/api/[[path]].js` at root and `public/index.html` in the `public` folder. If Github adds an extra enclosing folder, move its content up to the root.
 
-## Database and OTP patch
+## 2. Connect Google AI Studio FIRST
 
-- If you already ran both **`sql/setup.sql`** and **`sql/otp_rate_limit_patch.sql`** previously, **do not run or replace the database**. All existing customer records, wallet balances, payments and generated images remain in Supabase.
-- If you never ran `sql/otp_rate_limit_patch.sql`, run this additional SQL in your existing Supabase SQL Editor once. The original setup.sql was for initial setup only.
-- Check Supabase Storage has a **private** bucket `athave-results`.
+1. Open https://aistudio.google.com/api-keys using the Google account associated with the Gemini API billing project.
+2. Create/copy an API key. Make sure that the project has API billing/positive credit balance and access to the selected image model.
+3. In **Cloudflare → Workers & Pages → athave-ai → Settings → Variables and Secrets → Production** add:
 
-## Cloudflare Pages → Settings → Variables and Secrets (Production)
+| Name | Type | Value |
+|---|---|---|
+| `GEMINI_API_KEY` | **Secret** | Your Google AI Studio API key |
+| `GEMINI_IMAGE_MODEL` | Text | `gemini-3.1-flash-lite-image` |
+| `ANALYSIS_MODEL` | Text | `gemini-3.5-flash-lite` |
+| `GENERATION_ENABLED` | Text | `false` (until live testing) |
+| `AI_MONTHLY_CALL_CAP` | Text | `20` (low initial safety cap) |
+| `MAX_GENERATIONS_PER_DAY` | Text | `5` (initial user safety cap) |
 
-All previously added secrets remain in Cloudflare; this update **does not require regenerating keys**. The exact variable names are:
+4. Save and redeploy your production Cloudflare Pages deployment to apply changes.
+5. Sign into Athave AI with a real OTP, then open **`https://athave-ai.pages.dev/api/ai/check`** in the same browser. Expect `configured:true, accessible:true`. This checks key/model *metadata access only*; it cannot guarantee paid image generation will succeed. It does not create an image.
+6. Start with **manual product type** if image analysis gives an error. This skips the additional product-detection model call and is usually cheaper.
+7. Once all tests pass, set `GENERATION_ENABLED` to `true`, deploy configuration, and run **ONE real paid image test** with enough credits.
 
-```env
-SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=<ENCRYPTED>
-MSG91_WIDGET_ID=366a6b694b72373637383033
-MSG91_AUTH_KEY=<ENCRYPTED>
-SESSION_SECRET=<ENCRYPTED_RANDOM_SECRET>
-MSG91_WIDGET_TOKEN=<OPTIONAL_NOT_USED_BY_SERVER_OTP>
-GEMINI_API_KEY=<ENCRYPTED>
-GEMINI_IMAGE_MODEL=gemini-nano-banana-2.1
-ANALYSIS_MODEL=gemini-2.5-flash
-RAZORPAY_KEY_ID=<TEST_OR_LIVE_KEY_ID>
-RAZORPAY_KEY_SECRET=<ENCRYPTED>
-RAZORPAY_WEBHOOK_SECRET=<ENCRYPTED>
-GENERATION_ENABLED=false
-AI_MONTHLY_CALL_CAP=20
-MAX_GENERATIONS_PER_DAY=10
+Google image-output pricing depends on the chosen model and may change: https://ai.google.dev/gemini-api/docs/pricing. A 1024px output is not automatically profitable simply because your user paid ₹499. You must count separate front/back image requests, any paid analysis, failed upstream calls, payment fees and tax. If the output has a complex pattern, WebP may not be very small.
+
+## 3. Existing Supabase + MSG91 (DO NOT wipe data)
+
+You've already run the initial SQL and fixed service-role table privileges. **Do not rerun SQL to reset your live database.** Reuse your current:
+
+| Cloudflare variable | Type | Notes |
+|---|---|---|
+| `SUPABASE_URL` | Text | `https://PROJECT-ID.supabase.co` only (not `/rest/v1/`) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Secret | Server-side only |
+| `MSG91_WIDGET_ID` | Text | Your existing Widget ID |
+| `MSG91_AUTH_KEY` | Secret | Your server-side MSG91 auth key |
+| `SESSION_SECRET` | Secret | Your existing long random value **do not change casually**, it signs user sessions |
+
+`MSG91_WIDGET_TOKEN` may remain stored but is **not used** in this backend's CAPTCHA-free server OTP flow. Keep actual SMS provider account limits and validation active. This project uses server-issued secure HttpOnly session cookies; no frontend API secrets.
+
+Supabase Storage must have your **private `athave-results`** bucket. `sql/setup.sql` and `sql/otp_rate_limit_patch.sql` are reference/setup files for empty projects only. Your successful permissions patch should already be in effect.
+
+## 4. Payments
+
+The frontend offers:
+
+- ₹499 Starter (30 image credits)
+- ₹299 Top-up (18 image credits)
+- ₹100–₹10,000 custom top-ups (`floor(amount * 30 / 500)` credits)
+
+Payment order creation and captured-payment signature verification occur in the Cloudflare backend. A successful payment credits the wallet **only once** through Supabase RPC. Credits are deducted per requested output (front and back each cost one credit); failed jobs are refunded via the database function.
+
+For test payments add Cloudflare secrets:
+
+- `RAZORPAY_KEY_ID` (Text)
+- `RAZORPAY_KEY_SECRET` (Secret)
+- `RAZORPAY_WEBHOOK_SECRET` (Secret)
+
+Configure Razorpay webhook URL: `https://athave-ai.pages.dev/api/webhooks/razorpay` for the `payment.captured` event. Use the exact same webhook signing secret in both Razorpay and Cloudflare. Verify test capture and top-up before enabling real payments. Do not switch Test→Live credentials without merchant approval.
+
+## 5. Pages and behavior
+
+- `/` – homepage, sample white polo + earbuds + white sneaker. No upload box. No Get Started header button.
+- `/create/` – front photo required; back photo optional; optional manual product type; generate via Cloudflare API.
+- `/results/` – separate downloadable outputs, each exported by the browser to white-backed 1024×1024 WebP, and "Download all as ZIP".
+- `/profile/` – identity, image limit, progress, vertical links to history/payments/legal/personal website and developer.
+- `/profile/history/`, `/profile/payments/` – account activity and downloads.
+- `/about/`, `/terms/`, `/privacy/`, `/refunds/`, `/contact/`, `/how/` – standalone pages.
+
+Header back arrow returns to the previous same-origin page or sensible fallback. While the login modal is open, mobile/browser **Back dismisses the modal first**. User sessions persist through navigation/reload via secure server cookies; the site re-fetches Supabase account state and won't turn a temporary server failure into forced OTP login.
+
+For **a single garment front photo**, the AI attempts two separate front/back images; the unseen back is **inferred**, not guaranteed to match. For front+back photos, it uses both references. For shoes and other non-garments it normally makes one catalogue image. AI may alter tiny features, prints and logos; review outputs before listing them.
+
+## 6. Before accepting actual customers
+
+- Test real OTP → new account name → profile → reload → returning user login.
+- Test manual polo generation and one pair of front/back garment photos with a safe, small monthly cap.
+- Make sure `/api/ai/check` reports `accessible:true`.
+- Test actual WebP downloads, same-origin session and private Supabase Storage.
+- Test Razorpay sandbox payment capture and wallet credit exactly once.
+- Add real customer service email, phone, merchant address and service response policy in `public/contact/index.html`. Current contact page deliberately contains no invented support address.
+- Review/update all legal pages for your actual refund rules and applicable laws; these are drafts and not legal advice.
+- Optionally edit founder personal site URL in `public/profile/index.html` and `public/about/index.html` if it changes.
+
+## File structure
+
 ```
-
-Use `/api/config` to check whether the backend has the minimum login/payments/AI configuration. This endpoint never returns secret values. **Remove `/rest/v1/` from `SUPABASE_URL`**. Use **Secret** for all privileged keys.
-
-### Important: Login and name completion fix
-
-Previously, browser code could silently mark an authenticated user as logged out whenever `/api/me` failed due to a transient database error, then ask for OTP again at Generate. The updated site now explicitly waits for the server account response before dismissing login, preserves the correct authentication state, and shows a meaningful error if the verified account still cannot be loaded. Session cookies are HttpOnly, Secure and SameSite=Lax. The backend now has a minimal diagnostic endpoint: `GET /api/auth/session` (returns `authenticated: true` only when a valid stored account session exists; never reveals full phone).
-
-**If OTP verifies but the new account still isn't created**, check the status/error shown beneath the name field and Cloudflare Pages → Functions logs. In Supabase → Table Editor verify `customers` and `wallets` rows were created. Never fake OTP success or manually add arbitrary session cookies to work around a provider verification failure.
-
-### Test flow
-
-1. Visit site in a private tab, enter phone → **Send OTP** → receive SMS → verify actual code.
-2. For first-time user, enter name once. Do not proceed to paid top-up until the profile icon appears.
-3. Tap the person/profile SVG in the top right. Confirm name and phone, image limit, image history and payment history are visible.
-4. Refresh page: same account should remain signed in. Click Generate with photo uploaded: **it must not ask for OTP again** (but may ask for a top-up when limit is zero).
-5. Sign out, then verify Generate requires login again. For returning verified number, the name step should not reappear.
-6. Complete a Razorpay **Test Mode** top-up and verify exactly one wallet grant. A captured payment webhook uses `/api/webhooks/razorpay`.
-7. Only when Gemini model access, wallet and storage are proven, enable `GENERATION_ENABLED=true` and test one real image; charges apply. A photo of shirt + pants can create four separate outputs and consume four image credits.
-
-## Website improvements in this ZIP
-
-- Modern black/white homepage with the **transparent** Athave AI unicorn + exact brand name mark.
-- White polo and earbuds examples based on your supplied reference product images, with optimized pure-white-background WebP assets.
-- Profile SVG in the header; account panel, wallet limit, history and sign out.
-- Distinct pages at `/about/`, `/terms/`, `/privacy/`, `/refunds/`, `/contact/`.
-- Founder shown **only** in About; footer retains Quartz Web Solutions developer link but does not show founder.
-- Backend-side verified MSG91 OTP, Razorpay captured-payment check, one-time payment crediting, private image storage, 1024 × 1024 WebP conversion for downloads.
-
-## Before accepting actual payments
-
-1. Enter real business customer-support email, phone and operator address on `public/contact/index.html`. The package deliberately does not invent these details.
-2. Read and adapt the included policies to your actual business/refund practices and legal requirements. They are drafts, not legal advice.
-3. Have Razorpay merchant onboarding approved and use Live credentials only after test payment capture/refund scenarios work.
-4. Price real Gemini calls (including analysis and multi-output requests) before promising a percentage profit. Each output is a separately billed AI request, and failed generations can incur upstream charges.
-5. Re-check domain, policy links and `sitemap.xml` when moving to a custom domain.
-
-## Files
-
+public/
+  index.html                       Home
+  create/index.html               Upload and Generate
+  results/index.html              Results and WebP downloads
+  profile/index.html              Account overview and links
+  profile/history/index.html      Image history
+  profile/payments/index.html     Payment history
+  how/index.html                  How it works
+  about/index.html                Founder and developer
+  terms/index.html                Legal terms
+  privacy/index.html              Privacy
+  refunds/index.html              Refunds
+  contact/index.html              Support contact
+  styles.css                      Responsive white styling
+  app.js                          Unified interactive client
+  assets/                         Transparent logo, polo, earbuds, sneaker
+functions/api/[[path]].js          Cloudflare Pages backend
+sql/                               Existing schema and OTP safety SQL (reference)
+README.md
 ```
-public/index.html         Homepage and creator interface
-public/styles.css         Brand design, mobile layout and shared legal pages
-public/app.js             Client, login, uploads, wallet, Razorpay UI and WebP conversion
-public/assets/           Transparent unicorn brand images and white-background product examples
-public/about/index.html   About + founder + Quartz Web Solutions
-public/terms/index.html   Terms and payment conditions
-public/privacy/index.html Personal data policy
-public/refunds/index.html Refund and cancellation terms
-public/contact/index.html Support contact instructions
-functions/api/[[path]].js Cloudflare Pages backend
-sql/setup.sql             Initial schema (do not reset live DB)
-sql/otp_rate_limit_patch.sql Additional OTP protection schema (run only if not already applied)
-```
-
-All generated outputs should be checked for accuracy. The back view of a garment that wasn't photographed is **inferred** by AI and cannot be guaranteed to match the original. WebP size varies with content; the export aims to stay small without promising a fixed KB size.

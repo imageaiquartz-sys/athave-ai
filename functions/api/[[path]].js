@@ -196,6 +196,15 @@ export async function onRequest({request,env,params}){
     return response;
   }
   const user=await current(request,env);if(!user)return err('Please log in with your mobile number',401);
+  if(method==='GET'&&route==='ai/check'){
+   if(!env.GEMINI_API_KEY)return json({configured:false,model:env.GEMINI_IMAGE_MODEL||'gemini-3.1-flash-lite-image',message:'GEMINI_API_KEY is missing'});
+   const model=env.GEMINI_IMAGE_MODEL||'gemini-3.1-flash-lite-image';
+   try{
+    const check=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model),{headers:{'x-goog-api-key':env.GEMINI_API_KEY}});
+    if(!check.ok){const detail=await check.json().catch(()=>({}));return json({configured:true,accessible:false,model,message:String(detail?.error?.message||'Google denied model access').slice(0,160)});}
+    return json({configured:true,accessible:true,model,message:'Key is accepted and model metadata is accessible. Image generation still requires a real test.'});
+   }catch{return json({configured:true,accessible:false,model,message:'Could not contact Google AI Studio API'});}
+  }
   if(method==='GET'&&route==='me'){
    try{await rpc(env,'refund_stale_generations',{p_customer:user.id})}catch(e){console.warn('Optional stale generation cleanup:',String(e.message).slice(0,120))};
    const wallet=(await tbl(env,'GET','wallets',`?customer_id=eq.${user.id}&select=balance,purchased,used`))?.[0]||{balance:0,purchased:0,used:0};
@@ -204,10 +213,17 @@ export async function onRequest({request,env,params}){
   }
   if(method==='POST'&&route==='analyze'){
    let body=await request.json(),images=validateInputImages(body.images);
+   const manualKind=String(body.manualKind||'auto').toLowerCase();
+   if(manualKind!=='auto'&&!ALLOWED_KINDS.has(manualKind))return err('Invalid product type');
+   const walletBefore=(await tbl(env,'GET','wallets',`?customer_id=eq.${user.id}&select=balance`))?.[0]?.balance||0;
+   if(walletBefore<1)return err('Not enough image limit; top up before analysing a product');
+   if(manualKind!=='auto'){
+     return json({outputs:(GARMENTS.has(manualKind)?['front','back']:['catalogue']).map(side=>({kind:manualKind,side,inferred:side==='back'&&images.length<2}))});
+   }
    const prompt=`Analyze these product reference photos for a catalogue photo service. Return compact JSON only: {"items":[{"kind":"shirt|polo shirt|t-shirt|hoodie|jacket|dress|pants|jeans|shorts|skirt|cap|shoe|bag|product","isGarment":true|false}]}. Identify DISTINCT product types. If a person wears both shirt and pants return both (up to two). Treat multiple reference views of the same object as one item. Clothing and caps are garments that need separate front and back images. Shoes/bags/other objects need one professional catalogue image. Do not include people as items. Never invent products that are absent. Max 2 items.`;
-   let result;try{let parts=await gemini(env,[{text:prompt},...images],env.ANALYSIS_MODEL||'gemini-2.5-flash',{responseMimeType:'application/json'});result=JSON.parse(parts.find(x=>x.text)?.text||'{}')}catch{result={items:[{kind:'product',isGarment:false}]}}
+   let result;try{let parts=await gemini(env,[{text:prompt},...images],env.ANALYSIS_MODEL||'gemini-3.5-flash-lite',{responseMimeType:'application/json'});result=JSON.parse(parts.find(x=>x.text)?.text||'{}')}catch(e){throw Error('Product detection failed: '+String(e.message).slice(0,95)+'. Select the product type manually or check ANALYSIS_MODEL.')}
    let items=(Array.isArray(result.items)?result.items:[]).slice(0,2).filter(x=>ALLOWED_KINDS.has(x.kind));if(!items.length)items=[{kind:'product'}];
-   let outputs=[];for(let item of items){let garment=GARMENTS.has(item.kind);for(let side of (garment?['front','back']:['catalogue']))outputs.push({kind:item.kind,side,inferred:side==='back'})}
+   let outputs=[];for(let item of items){let garment=GARMENTS.has(item.kind);for(let side of (garment?['front','back']:['catalogue']))outputs.push({kind:item.kind,side,inferred:side==='back'&&images.length<2})}
    return json({outputs:outputs.slice(0,4)});
   }
   if(method==='POST'&&route==='generate'){
@@ -217,8 +233,8 @@ export async function onRequest({request,env,params}){
    if(!ALLOWED_KINDS.has(kind)||!['front','back','catalogue'].includes(side)||(!GARMENTS.has(kind)&&side!=='catalogue'))return err('Invalid image request');
    const job=await rpc(env,'reserve_generation',{p_customer:user.id,p_kind:kind,p_side:side,p_monthly_max:Number(env.AI_MONTHLY_CALL_CAP||80),p_daily_max:Number(env.MAX_GENERATIONS_PER_DAY||30)});
    try{
-    const prompt=`Use the supplied photo(s) as strict reference of ONE actual commercial product. Extract/isolate only the ${kind}. ${side==='catalogue'?'Show an ideal premium professional ecommerce product camera angle.':`Show its ${side.toUpperCase()} view as a standalone garment with natural realistic shape; remove the model/person entirely. If this angle is not visible, carefully infer a plausible ${side} based on supplied references; do NOT claim unseen details are exact.`} Pure #FFFFFF background edge-to-edge, centered with 8–12% margin, no person/human, no hanger, no props, no extra product, no added graphics, no captions or watermarks. Maintain exact product color, material, patches, pattern, seams, text and logo wherever visible; don't invent logos, words, badges or alter known design. Photorealistic high-end studio lighting, clean premium catalogue cutout. SINGLE product only, 1:1 square 1024x1024.`;
-    let parts=await gemini(env,[{text:prompt},...images],env.GEMINI_IMAGE_MODEL||'gemini-nano-banana-2.1',{responseModalities:['IMAGE'],imageConfig:{aspectRatio:'1:1',imageSize:'1K'}});
+    const prompt=`Use the supplied photo(s) as strict reference of ONE actual commercial product. ${images.length===2?'The first supplied photo is the FRONT and the second is the BACK of the same original product when both show the same item. Use the correct reference for each requested angle.':'Only the first/front reference is available. Do not claim the unseen back is original.'} Extract/isolate only the ${kind}. ${side==='catalogue'?'Show an ideal premium professional ecommerce product camera angle.':`Show its ${side.toUpperCase()} view as a standalone garment with natural realistic shape; remove the model/person entirely. If this angle is not visible, carefully infer a plausible ${side} based on supplied references; do NOT claim unseen details are exact.`} Pure #FFFFFF background edge-to-edge, centered with 8–12% margin, no person/human, no hanger, no props, no extra product, no added graphics, no captions or watermarks. Maintain exact product color, material, patches, pattern, seams, text and logo wherever visible; don't invent logos, words, badges or alter known design. Photorealistic high-end studio lighting, clean premium catalogue cutout. SINGLE product only, 1:1 square 1024x1024.`;
+    let parts=await gemini(env,[{text:prompt},...images],env.GEMINI_IMAGE_MODEL||'gemini-3.1-flash-lite-image',{responseModalities:['TEXT','IMAGE'],responseFormat:{image:{aspectRatio:'1:1',imageSize:'1K'}}});
     const part=parts.find(p=>p.inlineData?.data&&p.inlineData?.mimeType?.startsWith('image/'));
     if(!part)throw Error('AI returned no picture. Check Gemini image model access.');
     const binary=Uint8Array.from(atob(part.inlineData.data),c=>c.charCodeAt(0));if(binary.length>8500000)throw Error('AI output too large');

@@ -1,178 +1,272 @@
-const $=id=>document.getElementById(id);
-let config=null, me=null, uploaded=[], currentPhone='', activeTab='history', isGenerating=false;
-const show=(el,visible)=>{el.hidden=!visible};
-const status=(msg,isError=false)=>{$('studioStatus').textContent=msg;$('studioStatus').classList.toggle('error',isError)};
-const authStatus=(msg,isError=false)=>{$('authMsg').textContent=msg;$('authMsg').classList.toggle('error',isError)};
-async function api(path,options={}){
- const r=await fetch('/api/'+path,{credentials:'same-origin',cache:'no-store',...options});
- const data=await r.json().catch(()=>({}));
- if(!r.ok){const error=new Error(data.error||('Request failed (HTTP '+r.status+')'));error.status=r.status;throw error}
- return data;
+/* Athave AI - unified frontend: Cloudflare Pages + service-role backed API. */
+const $ = id => document.getElementById(id);
+const page = document.body.dataset.page;
+let config = null, me = null, lastAuthError = null, verifying = false, generating = false;
+let currentPhone = '', activePayment = null;
+let selected = { front: null, back: null };
+const pendingTimer = { start: 0 };
+const homeUrl = location.pathname + location.search;
+function show(node, state) { if (node) node.hidden = !state; }
+function toast(msg, isError = false) {
+ const node = $('toast'); if (!node) return;
+ node.textContent = msg; node.hidden = false; node.style.background = isError ? '#a5222e' : '#15171b';
+ clearTimeout(window.__athaveToast); window.__athaveToast = setTimeout(() => node.hidden = true, 5500);
 }
-const post=(path,data)=>api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-const openLogin=()=>{show($('authOverlay'),true);authStep('phoneForm');authStatus('');$('phone').focus()};
-function closeLogin(){show($('authOverlay'),false);authStatus('')}
-function authStep(s){for(let name of ['phoneForm','otpForm','nameForm'])show($(name),name===s)}
-for(const id of ['heroStart','ctaStart'])$(id).addEventListener('click',()=>{if(me){document.getElementById('studio').scrollIntoView({behavior:'smooth'})}else openLogin()});
-$('navAccount').addEventListener('click',()=>{if(me)openProfile();else openLogin()});
-$('profileIconBtn').addEventListener('click',openProfile);
-function openProfile(){if(!me)return openLogin();document.getElementById('profile').scrollIntoView({behavior:'smooth',block:'start'})}
-async function finishLogin(message){
- try{
-  const ok=await refresh({required:true});
-  if(!ok)throw Error('Your phone was verified but login session was not found. Please try again.');
-  closeLogin();authStep('phoneForm');$('otp').value='';$('name').value='';
-  status(message);return true;
- }catch(e){authStatus('Account verification succeeded, but your session did not load: '+e.message,true);return false}
+function pageStatus(msg, error = false) {
+ const node = $('studioStatus') || $('profileStatus') || $('paymentStatus');
+ if (node) { node.textContent = msg; node.classList.toggle('error', error); }
+ else toast(msg, error);
 }
-$('modalShade').onclick=closeLogin;$('closeAuth').onclick=closeLogin;
-$('changePhone').onclick=()=>{authStep('phoneForm');authStatus('');$('otp').value=''};
-// OTP is sent and verified by the Cloudflare backend via the official MSG91
-// Widget API. We intentionally do not embed the MSG91 browser SDK or CAPTCHA.
-const RESEND_DELAY_SECONDS=60;
-let otpLastSentAt=0;
-let sendingOtp=false;
-let verifyingOtp=false;
-function setOtpBusy(isBusy){
- const send=$('phoneForm').querySelector('[type="submit"]');
- const verify=$('otpForm').querySelector('[type="submit"]');
- send.disabled=isBusy;verify.disabled=isBusy;
+function authStatus(msg, error = false) {
+ if ($('authMsg')) { $('authMsg').textContent = msg; $('authMsg').classList.toggle('error', error); }
 }
-function updateRetryButton(){
- const button=$('retryOtp');
- const seconds=Math.max(0,Math.ceil((otpLastSentAt+RESEND_DELAY_SECONDS*1000-Date.now())/1000));
- button.disabled=seconds>0||sendingOtp;
- button.textContent=seconds>0?`Resend in ${seconds}s`:'Resend code';
+async function api(route, options = {}) {
+ const response = await fetch('/api/' + route, { credentials:'same-origin', cache:'no-store', ...options });
+ const json = await response.json().catch(() => ({}));
+ if (!response.ok) { const ex = new Error(json.error || 'Request failed (HTTP ' + response.status + ')'); ex.status = response.status; throw ex; }
+ return json;
 }
-setInterval(updateRetryButton,1000);
-async function sendOtpFromServer(){
- if(sendingOtp)return;
- sendingOtp=true;setOtpBusy(true);
- try{
-  authStatus('Sending verification code...');
-  await post('auth/send-otp',{phone:currentPhone});
-  otpLastSentAt=Date.now();
-  $('otp').value='';authStep('otpForm');
-  authStatus('OTP sent. Enter the code received on your phone.');
- }catch(e){authStatus(e.message||'Could not send OTP',true)}
- finally{sendingOtp=false;setOtpBusy(false);updateRetryButton()}
+function post(route, value) { return api(route, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(value) }); }
+function setAuthStep(step) {
+ for (const id of ['phoneForm','otpForm','nameForm']) show($(id), id === step);
 }
-$('phoneForm').onsubmit=async ev=>{
- ev.preventDefault();
- const number=String($('phone').value||'').replace(/\D/g,'');
- if(!/^[6-9]\d{9}$/.test(number)){
-  authStatus('Enter a valid Indian mobile number',true);return;
+let authIsOpen = false;
+let postLoginAction = null;
+function openLogin(after = null) {
+ if (typeof after === 'function') postLoginAction = after;
+ if (authIsOpen) return;
+ authIsOpen = true; show($('authOverlay'),true); setAuthStep('phoneForm'); authStatus('');
+ const url = location.pathname + location.search + '#login';
+ if (location.hash !== '#login') history.pushState({ athaveLogin:true }, '', url);
+ setTimeout(()=>$('phone')?.focus(), 20);
+}
+function closeLogin(useBack = false) {
+ if (!authIsOpen) return;
+ authIsOpen = false; show($('authOverlay'),false); authStatus('');
+ if (location.hash === '#login') {
+  if (useBack) history.back();
+  else history.replaceState({}, '', location.pathname + location.search);
  }
- currentPhone='91'+number;
- await sendOtpFromServer();
-};
-$('otpForm').onsubmit=async ev=>{
- ev.preventDefault();if(verifyingOtp)return;
- const code=$('otp').value.trim();
- if(!/^\d{4,8}$/.test(code)){authStatus('Enter the OTP code',true);return}
- verifyingOtp=true;setOtpBusy(true);
- try{
-  authStatus('Verifying your number...');
-  const result=await post('auth/verify-otp',{otp:code});
-  if(result.needsName){
-   authStep('nameForm');authStatus('Verified! Enter your name once to finish your account.');
-  }else{
-   await finishLogin('Welcome! Upload your product photos to begin.');
-  }
- }catch(e){authStatus(e.message||'OTP verification failed',true)}
- finally{verifyingOtp=false;setOtpBusy(false)}
-};
-$('retryOtp').onclick=()=>{
- if(Date.now()<otpLastSentAt+RESEND_DELAY_SECONDS*1000){updateRetryButton();return}
- if(!currentPhone){authStep('phoneForm');return}
- sendOtpFromServer();
-};
-$('nameForm').onsubmit=async ev=>{ev.preventDefault();try{let name=$('name').value.trim();if(!name)throw Error('Please enter your name');
- await post('auth/complete',{name});await finishLogin('Account created successfully. You can start generating.')
- }catch(e){authStatus(e.message,true)}};
-$('signOut').onclick=async()=>{try{await post('auth/logout',{});await refresh();status('Signed out.')}catch(e){status(e.message,true)}};
-async function refresh({required=false,quiet=false}={}){
- try{
-  const result=await api('me');
-  if(!result?.user?.name||!result?.user?.phone)throw Error('Account response incomplete. Please check Supabase customer record.');
-  me=result;
-  $('profile').hidden=false;
-  $('navAccount').hidden=true;
-  $('profileIconBtn').hidden=false;
-  $('profileName').textContent=me.user.name;
-  $('profilePhone').textContent='+'+me.user.phone;
-  $('walletRemaining').textContent=me.wallet.balance;
-  $('walletUsed').textContent=me.wallet.used;
-  $('walletPurchased').textContent=me.wallet.purchased;
-  const pct=me.wallet.purchased?Math.min(100,100*me.wallet.used/me.wallet.purchased):0;
-  $('progressFill').style.width=pct.toFixed(1)+'%';
-  $('adminTab').hidden=!me.user.isAdmin;
-  renderProfile();return true;
- }catch(e){
-  if(e.status===401){
-   me=null;$('profile').hidden=true;
-   $('navAccount').hidden=false;
-   $('profileIconBtn').hidden=true;
-   $('navAccount').innerHTML='Get started <span>↗</span>';
-  }else if(!quiet){status('Account loading error: '+e.message,true)}
-  if(required)throw e;
-  return false;
- }finally{updateGenerateButton()}
 }
-function element(tag,cl,text){const node=document.createElement(tag);if(cl)node.className=cl;if(text!==undefined)node.textContent=text;return node}
-function renderProfile(){let root=$('profileList');root.replaceChildren();let rows=[];
- if(activeTab==='history'){
-  rows=me.history||[];for(let j of rows){let card=element('div','hist-card');
-   if(j.status==='completed'){let image=element('img');image.src='/api/images/'+j.id;image.alt=j.kind+' '+j.side;card.append(image)}
-   let d=element('div','hist-desc');d.append(element('strong',null,`${j.kind} — ${j.side}`),element('span',null,`${j.status} · ${new Date(j.created_at).toLocaleDateString('en-IN')}`));
-   if(j.status==='completed'){let btn=element('button',null,'Download WebP ↓');btn.onclick=()=>downloadWebp(j.id,j.kind+'-'+j.side);d.append(btn)}card.append(d);root.append(card)
-  }
- }else if(activeTab==='payments'){
-  rows=me.payments||[];for(let p of rows){let card=element('div','hist-card');let d=element('div','hist-desc');d.append(element('strong',null,`₹${(p.amount_paise/100).toFixed(0)} • ${p.plan}`),element('span',null,`${p.status} · ${new Date(p.created_at).toLocaleString('en-IN')}`));card.append(d);root.append(card)}
- }else if(activeTab==='admin'){
-  root.append(element('div','notice','Loading admin overview...'));
-  api('admin').then(data=>{root.replaceChildren();let x=element('div','notice',`${data.users.length} recent customers · ₹${data.revenue} captured revenue · ${data.soldCredits} purchased credits`);root.append(x);for(let u of data.users){let d=element('div','hist-card');d.append(element('div','hist-desc',`${u.name} · +${u.phone}`));root.append(d)}}).catch(e=>{root.replaceChildren(element('div','notice',e.message))});return;
+window.addEventListener('popstate',() => {
+ if (authIsOpen && location.hash !== '#login') { authIsOpen = false; show($('authOverlay'),false); authStatus(''); }
+});
+if ($('closeAuth')) $('closeAuth').onclick = ()=>closeLogin(true);
+if ($('modalShade')) $('modalShade').onclick = ()=>closeLogin(true);
+document.addEventListener('keydown', e=>{if(e.key==='Escape' && authIsOpen)closeLogin(true)});
+if ($('backBtn')) $('backBtn').onclick=()=>{
+ if(authIsOpen){closeLogin(true);return}
+ try { if (document.referrer && new URL(document.referrer).origin === location.origin) { history.back(); return; } } catch {}
+ const fallback = page==='history'||page==='payments' ? '/profile/' : '/';
+ location.href=fallback;
+};
+async function refresh({ required = false, quiet = false } = {}) {
+ try { me = await api('me'); lastAuthError = null; renderUser(); return me; }
+ catch (e) {
+  lastAuthError = e;
+  if (e.status === 401) { me = null; renderUser(); if (required) throw e; return null; }
+  if (!quiet) pageStatus('Could not load your account: ' + e.message, true);
+  if (required) throw e;
+  return me;
  }
- if(!rows.length)root.append(element('div','notice','Nothing to show yet.'));
 }
-for(let [id,tab] of [['historyTab','history'],['paymentsTab','payments'],['adminTab','admin']])$(id).onclick=()=>{activeTab=tab;document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));$(id).classList.add('active');renderProfile()};
-function addFiles(files){for(let f of files){if(uploaded.length>=2)break;if(!['image/jpeg','image/png','image/webp'].includes(f.type)){status('Only JPG, PNG and WebP supported',true);continue}if(f.size>7*1024*1024){status('Each image must be below 7 MB',true);continue}uploaded.push(f)}renderUploads()}
-function renderUploads(){let root=$('uploadPreview');root.replaceChildren();uploaded.forEach((f,i)=>{let box=element('div','filechip'),img=element('img'),url=URL.createObjectURL(f);img.src=url;img.onload=()=>URL.revokeObjectURL(url);let name=element('span',null,f.name),del=element('button',null,'×');del.onclick=()=>{uploaded.splice(i,1);renderUploads()};box.append(img,name,del);root.append(box)});updateGenerateButton()}
-function updateGenerateButton(){$('generateBtn').disabled=isGenerating||!uploaded.length;}
-const zone=$('dropzone'),picker=$('filepicker');zone.onclick=()=>picker.click();zone.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();picker.click()}};picker.onchange=()=>{addFiles([...picker.files]);picker.value=''};zone.ondragover=e=>{e.preventDefault();zone.classList.add('dragging')};zone.ondragleave=()=>zone.classList.remove('dragging');zone.ondrop=e=>{e.preventDefault();zone.classList.remove('dragging');addFiles([...e.dataTransfer.files])};
-async function encodePhoto(file){let bitmap=await createImageBitmap(file);const max=1080,ratio=Math.min(1,max/Math.max(bitmap.width,bitmap.height));let canvas=document.createElement('canvas');canvas.width=Math.round(bitmap.width*ratio);canvas.height=Math.round(bitmap.height*ratio);let ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();let data=canvas.toDataURL('image/jpeg',.78).split(',')[1];if(data.length>1600000)throw Error('Photo is too large after optimization. Try another.');return{mime:'image/jpeg',data}}
-function renderEmpty(){let root=$('results');root.replaceChildren();let d=element('div','empty');d.append(element('div','empty-picture','✧'),element('h4',null,'Preparing your creative studio'),element('p',null,'Your generated photos will appear here.'));root.append(d)}
-function imageCard(id,label,preview=true){let root=$('results');if(root.firstElementChild?.classList.contains('empty'))root.replaceChildren();let card=element('div','result-item'),img=element('img');img.src='/api/images/'+id;img.alt=label;let row=element('div','result-footer'),texts=element('div');texts.append(element('strong',null,label),element('small',null,'1024 × 1024 WebP'));let button=element('button',null,'Download ↓');button.onclick=()=>downloadWebp(id,label);row.append(texts,button);card.append(img,row);root.append(card);return card}
-async function optimizedWebp(id){let r=await fetch('/api/images/'+id,{credentials:'same-origin'});if(!r.ok)throw Error('Could not load generated image');let b=await r.blob();let bitmap=await createImageBitmap(b);let c=document.createElement('canvas');c.width=1024;c.height=1024;let ctx=c.getContext('2d');ctx.fillStyle='#ffffff';ctx.fillRect(0,0,1024,1024);
- const scale=Math.min(1024/bitmap.width,1024/bitmap.height);let w=Math.round(bitmap.width*scale),h=Math.round(bitmap.height*scale);ctx.drawImage(bitmap,(1024-w)/2,(1024-h)/2,w,h);bitmap.close();
- let blob=await new Promise(done=>c.toBlob(done,'image/webp',.8));if(!blob||blob.type!=='image/webp')throw Error('WebP export not supported in this browser');
- for(let q of [.7,.6,.52]){if(blob.size<=350000)break;let next=await new Promise(done=>c.toBlob(done,'image/webp',q));if(next)blob=next}
+function renderUser() {
+ if($('profileName')) $('profileName').textContent=me?.user?.name||'Your account';
+ if($('profilePhone')) $('profilePhone').textContent=me?.user?.phone ? '+'+me.user.phone : 'Log in to view your number';
+ if($('walletRemaining')) $('walletRemaining').textContent=me?.wallet?.balance ?? '—';
+ if($('walletPurchased')) $('walletPurchased').textContent=me?.wallet?.purchased ?? '—';
+ if($('walletUsed')) $('walletUsed').textContent=me?.wallet?.used ?? '—';
+ if($('uploadWallet')) $('uploadWallet').textContent=me?.wallet?.balance ?? 'Sign in';
+ if($('progressFill')) $('progressFill').style.width=me?.wallet?.purchased ? Math.min(100,100*me.wallet.used/me.wallet.purchased)+'%' : '0%';
+ if(page==='history') renderHistory();
+ if(page==='payments') renderPayments();
+}
+async function ensureLogin(next) {
+ try { await refresh({required:true,quiet:true}); }
+ catch(e) {
+  if (e.status === 401) { openLogin(next); return false; }
+  pageStatus('Account service error: ' + e.message, true); return false;
+ }
+ return true;
+}
+async function loginSuccess() {
+ try {
+  await refresh({required:true,quiet:true});
+  if (!me) throw new Error('Your account could not be loaded yet.');
+  closeLogin(false);
+  authStatus('');
+  $('otp').value=''; $('name').value='';
+  toast('Signed in successfully. Welcome to Athave AI!');
+  let callback=postLoginAction;postLoginAction=null;
+  if (callback) await callback();
+  else if(page==='profile'||page==='history'||page==='payments') renderUser();
+ } catch (e) {
+  authStatus('OTP was accepted but the account session did not load: ' + e.message, true);
+ }
+}
+$('phoneForm').onsubmit = async ev => {
+ ev.preventDefault(); const raw=$('phone').value.replace(/\D/g,'');
+ if(!/^[6-9]\d{9}$/.test(raw))return authStatus('Enter a valid Indian mobile number',true);
+ currentPhone='91'+raw;
+ const btn=$('phoneForm').querySelector('button[type=submit]'); btn.disabled=true;
+ try { authStatus('Sending OTP to +'+currentPhone+'…'); await post('auth/send-otp',{phone:currentPhone}); setAuthStep('otpForm'); authStatus('SMS sent. Enter your OTP.'); }
+ catch(e){authStatus(e.message,true)} finally{btn.disabled=false}
+};
+$('otpForm').onsubmit = async ev => {
+ ev.preventDefault(); if(verifying)return;
+ const code=$('otp').value.trim(); if(!/^\d{4,8}$/.test(code))return authStatus('Enter the OTP code',true);
+ verifying=true; const btn=$('otpForm').querySelector('button[type=submit]');btn.disabled=true;
+ try {
+  authStatus('Verifying…'); const result=await post('auth/verify-otp',{otp:code});
+  if(result.needsName){setAuthStep('nameForm');authStatus('Verified! Enter your name to finish creating your account.');}
+  else await loginSuccess();
+ }catch(e){authStatus(e.message,true)}finally{verifying=false;btn.disabled=false}
+};
+$('nameForm').onsubmit=async ev=>{
+ ev.preventDefault();let name=$('name').value.trim(); if(!name)return authStatus('Please enter your name',true);
+ const btn=$('nameForm').querySelector('button[type=submit]');btn.disabled=true;
+ try{await post('auth/complete',{name});await loginSuccess()}catch(e){authStatus(e.message,true)}finally{btn.disabled=false}
+};
+$('retryOtp').onclick=async()=>{
+ if(Date.now()-pendingTimer.start < 15000)return authStatus('Please wait before resending.');
+ pendingTimer.start=Date.now();
+ try{await post('auth/send-otp',{phone:currentPhone});authStatus('A fresh OTP was sent.')}catch(e){authStatus(e.message,true)}
+};
+$('changePhone').onclick=()=>{setAuthStep('phoneForm');$('otp').value='';authStatus('')};
+async function signOut(){try{await post('auth/logout',{});me=null;renderUser();location.href='/'}catch(e){toast(e.message,true)}}
+if($('signOut'))$('signOut').onclick=signOut;
+// Uploaded image handling: two independent slots, front required, back optional.
+function formatBytes(bytes){return bytes < 1048576 ? Math.round(bytes/1024)+' KB' : (bytes/1048576).toFixed(1)+' MB'}
+function renderPhotoSlot(side) {
+ const root=$(side+'Preview'); if(!root)return;root.replaceChildren(); const file=selected[side]; root.hidden=!file;
+ if(!file)return;
+ const pic=document.createElement('img'), u=URL.createObjectURL(file);pic.src=u;pic.onload=()=>URL.revokeObjectURL(u);
+ const text=document.createElement('div'),n=document.createElement('b'),sz=document.createElement('small');n.textContent=file.name;sz.textContent=formatBytes(file.size);text.append(n,sz);
+ const remove=document.createElement('button');remove.type='button';remove.textContent='×';remove.setAttribute('aria-label','Remove photo');remove.onclick=()=>{selected[side]=null;$(side+'File').value='';renderPhotoSlot(side)};
+ root.append(pic,text,remove);
+}
+function assignPhoto(side,file){
+ if(!file)return;
+ if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>7*1024*1024){pageStatus('Please select JPG, PNG or WebP under 7 MB.',true);return}
+ selected[side]=file;renderPhotoSlot(side);pageStatus('');
+}
+for(const side of ['front','back']) {
+ const input=$(side+'File'),drop=$(side+'Drop');if(!input)continue;
+ input.onchange=()=>assignPhoto(side,input.files?.[0]);
+ drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('is-dragging')});
+ drop.addEventListener('dragleave',()=>drop.classList.remove('is-dragging'));
+ drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('is-dragging');assignPhoto(side,e.dataTransfer.files?.[0])});
+}
+async function encodePhoto(file){
+ let bmp=await createImageBitmap(file),scale=Math.min(1,1080/Math.max(bmp.width,bmp.height));
+ let c=document.createElement('canvas');c.width=Math.round(bmp.width*scale);c.height=Math.round(bmp.height*scale);
+ let ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);ctx.drawImage(bmp,0,0,c.width,c.height);bmp.close();
+ let data=c.toDataURL('image/jpeg',.76).split(',')[1];if(data.length>1600000)throw Error('This photo is too large after optimization. Use a smaller one.');
+ return {mime:'image/jpeg',data};
+}
+function storeResults(list){sessionStorage.setItem('athave_recent_results', JSON.stringify(list));}
+function storedResults(){try{return JSON.parse(sessionStorage.getItem('athave_recent_results')||'[]')}catch{return []}}
+async function generate(){
+ if(generating)return;
+ if(!selected.front)return pageStatus('Please upload the front image first.',true);
+ if(!await ensureLogin(generate))return;
+ generating=true;let button=$('generateBtn');button.disabled=true;
+ let made=[];
+ try{
+  pageStatus('Preparing reference photos…');const images=await Promise.all([selected.front,selected.back].filter(Boolean).map(encodePhoto));
+  pageStatus('Analysing the products in your photo…');const analysis=await post('analyze',{images,manualKind:$('productType')?.value||'auto'});const outputs=analysis.outputs||[];
+  if(!outputs.length)throw Error('No product detected in your reference photo.');
+  if((me.wallet?.balance ?? 0)<outputs.length)throw Error(`You need ${outputs.length} image credits. Your account has ${me.wallet.balance}. Add a top-up from Pricing.`);
+  for(let i=0;i<outputs.length;i++){
+   const target=outputs[i],label=`${target.kind} — ${target.side}${target.inferred?' (AI-inferred)':''}`;
+   pageStatus(`Generating ${i+1} of ${outputs.length}: ${label}. Keep this tab open…`);
+   try {
+    const job=await post('generate',{images,kind:target.kind,side:target.side});
+    made.push({id:job.id,label,kind:target.kind,side:target.side});storeResults(made);
+    // The original output remains in private Supabase Storage. WebP conversion is done client-side on download.
+   }catch(e){pageStatus(`Could not generate ${label}: ${e.message}`,true);if(!made.length)throw e;break}
+  }
+  if(made.length){storeResults(made);location.href='/results/'}
+ }catch(e){pageStatus(e.message,true)}finally{generating=false;button.disabled=false;await refresh({quiet:true})}
+}
+if($('generateBtn')) $('generateBtn').onclick=generate;
+// Images downloaded via authenticated private endpoint and browser WebP conversion.
+async function optimizedWebp(id){
+ const response=await fetch('/api/images/'+id,{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw Error('Could not load generated image');
+ const bmp=await createImageBitmap(await response.blob());const c=document.createElement('canvas');c.width=1024;c.height=1024;
+ const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,1024,1024);
+ const scale=Math.min(1024/bmp.width,1024/bmp.height);const w=Math.round(bmp.width*scale),h=Math.round(bmp.height*scale);
+ ctx.drawImage(bmp,(1024-w)/2,(1024-h)/2,w,h);bmp.close();
+ let blob=await new Promise(resolve=>c.toBlob(resolve,'image/webp',.82));if(!blob||blob.type!=='image/webp')throw Error('WebP export not supported on this browser');
+ for(const q of [.7,.62,.54]) {if(blob.size<=350000)break;let smaller=await new Promise(resolve=>c.toBlob(resolve,'image/webp',q));if(smaller)blob=smaller}
  return blob;
 }
-async function saveWebp(id,blob){try{await api('images/'+id+'/webp',{method:'POST',headers:{'Content-Type':'image/webp'},body:blob})}catch(e){console.warn('WebP backup not saved:',e.message)}}
-async function downloadWebp(id,label){try{status('Preparing optimized WebP download...');let blob=await optimizedWebp(id);let link=document.createElement('a'),url=URL.createObjectURL(blob);link.href=url;link.download=`athave-ai-${label.toLowerCase().replace(/[^a-z0-9-]/g,'-')}-${id.slice(0,8)}.webp`;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);await saveWebp(id,blob);status(`Downloaded 1024×1024 WebP (${Math.round(blob.size/1024)} KB).`)}catch(e){status(e.message,true)}}
-$('generateBtn').onclick=async()=>{
- if(!me){try{await refresh({required:true,quiet:true})}catch(e){if(e.status!==401){status('Cannot check account: '+e.message,true);return}}if(!me){openLogin();return}}if(isGenerating||!uploaded.length)return;
- isGenerating=true;updateGenerateButton();renderEmpty();let done=0;
- try{status('Optimizing your input photos...');const images=await Promise.all(uploaded.map(encodePhoto));status('Identifying products in your photos...');
-  let analysis=await post('analyze',{images});let outputs=analysis.outputs||[];if(!outputs.length)throw Error('Could not recognize any product');
-  if(me.wallet.balance<outputs.length)throw Error(`You need ${outputs.length} remaining image limits for these outputs. Top up below.`);
-  status(`Creating ${outputs.length} separate catalogue images...`);
-  for(let [index,target] of outputs.entries()){
-   let label=`${target.kind} — ${target.side}${target.inferred?' (inferred)':''}`;
-   status(`Generating ${index+1}/${outputs.length}: ${label}. Please keep this tab open.`);
-   try{let response=await post('generate',{images,kind:target.kind,side:target.side});imageCard(response.id,label);done++;
-    // Browser conversion shrinks output and saves WebP in private storage.
-    let blob=await optimizedWebp(response.id);await saveWebp(response.id,blob);
-   }catch(e){status(`Output ${index+1} failed: ${e.message}`,true)}
-  }
-  uploaded=[];renderUploads();await refresh();if(done)status(`Created ${done}/${outputs.length} images. Click Download below each photo.`)
- }catch(e){status(e.message,true)}finally{isGenerating=false;updateGenerateButton()}
+async function getOptimized(id){
+ const blob=await optimizedWebp(id);
+ // Save compressed copy back to private Supabase storage. Failure does not prevent download.
+ fetch('/api/images/'+id+'/webp',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'image/webp'},body:blob}).catch(()=>{});
+ return blob;
+}
+function downloadBlob(blob,name){const u=URL.createObjectURL(blob),link=document.createElement('a');link.href=u;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(u),30000)}
+function safeName(name){return 'athave-ai-'+String(name).toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,55)}
+async function downloadSingle(item){try{pageStatus('Preparing WebP download…');const blob=await getOptimized(item.id);downloadBlob(blob,safeName(item.label)+'.webp');pageStatus('Downloaded 1024 × 1024 WebP · '+formatBytes(blob.size))}catch(e){pageStatus(e.message,true)}}
+function buildOutputCard(item){
+ const card=document.createElement('article');card.className='output-card';
+ const image=document.createElement('div');image.className='output-image';
+ const pic=document.createElement('img');pic.src='/api/images/'+encodeURIComponent(item.id);pic.alt=item.label;pic.loading='lazy';image.append(pic);
+ const footer=document.createElement('div');footer.className='output-footer';const desc=document.createElement('div');
+ const strong=document.createElement('strong'),small=document.createElement('small');strong.textContent=item.label;small.textContent='1024 × 1024 · WebP';desc.append(strong,small);
+ const btn=document.createElement('button');btn.type='button';btn.textContent='Download ↓';btn.onclick=()=>downloadSingle(item);footer.append(desc,btn);card.append(image,footer);return card;
+}
+async function populateResults(){
+ let list=storedResults();if(!list.length){let user=await refresh({quiet:true});if(user){list=(user.history||[]).filter(x=>x.status==='completed').slice(0,8).map(x=>({id:x.id,label:x.kind+' — '+x.side}))}}
+ const root=$('resultsGrid');root.replaceChildren();if(!list.length){root.innerHTML='<div class="empty-card">No generated images yet. <a href="/create/" style="text-decoration:underline">Create your first product photo</a>.</div>';return}
+ for(const item of list)root.append(buildOutputCard(item));
+}
+// ZIP encoder (store-only, no dependency). WebP is already compressed.
+function crc32(bytes){let v=0xffffffff;for(let b of bytes){v^=b;for(let i=0;i<8;i++)v=(v>>>1)^((v&1)?0xedb88320:0)}return (v^0xffffffff)>>>0}
+function u16(out,num){out.push(num&255,(num>>>8)&255)}
+function u32(out,num){out.push(num&255,(num>>>8)&255,(num>>>16)&255,(num>>>24)&255)}
+async function zipResults(items){
+ const files=[];for(let i=0;i<items.length;i++){pageStatus('Preparing '+(i+1)+' of '+items.length+' WebP files…');let b=await getOptimized(items[i].id);files.push({name:safeName(items[i].label)+'-'+(i+1)+'.webp',bytes:new Uint8Array(await b.arrayBuffer())})}
+ let chunks=[],entries=[],offset=0;let te=new TextEncoder();
+ for(const f of files){let name=te.encode(f.name),crc=crc32(f.bytes),local=[];u32(local,0x04034b50);u16(local,20);u16(local,0);u16(local,0);u16(local,0);u16(local,0);u32(local,crc);u32(local,f.bytes.length);u32(local,f.bytes.length);u16(local,name.length);u16(local,0);
+ chunks.push(new Uint8Array(local),name,f.bytes);entries.push({name,crc,length:f.bytes.length,offset});offset+=local.length+name.length+f.bytes.length;}
+ let center=[];
+ for(const f of entries){u32(center,0x02014b50);u16(center,20);u16(center,20);u16(center,0);u16(center,0);u16(center,0);u16(center,0);u32(center,f.crc);u32(center,f.length);u32(center,f.length);u16(center,f.name.length);u16(center,0);u16(center,0);u16(center,0);u16(center,0);u32(center,0);u32(center,f.offset);center.push(...f.name)}
+ const cdSize=center.length;chunks.push(new Uint8Array(center));let end=[];u32(end,0x06054b50);u16(end,0);u16(end,0);u16(end,entries.length);u16(end,entries.length);u32(end,cdSize);u32(end,offset);u16(end,0);chunks.push(new Uint8Array(end));
+ return new Blob(chunks,{type:'application/zip'});
+}
+if($('downloadAllBtn'))$('downloadAllBtn').onclick=async()=>{
+ const list=storedResults();if(!list.length)return pageStatus('No recent results found.',true);
+ const btn=$('downloadAllBtn');btn.disabled=true;try{downloadBlob(await zipResults(list),'athave-ai-results.zip');pageStatus('All results downloaded as ZIP.')}catch(e){pageStatus(e.message,true)}finally{btn.disabled=false}
 };
-async function pay(plan,amount){if(!me){try{await refresh({required:true,quiet:true})}catch(e){if(e.status!==401){status('Cannot check account: '+e.message,true);return}}if(!me){openLogin();return}}try{let order=await post('payments/order',{plan,amount});if(!window.Razorpay)throw Error('Razorpay checkout did not load');
- let checkout=new window.Razorpay({key:order.keyId,order_id:order.orderId,amount:order.amount,currency:'INR',name:'Athave AI',description:'Image generation top-up',prefill:{contact:me.user.phone.slice(2)},theme:{color:'#141414'},handler:async data=>{try{await post('payments/verify',data);await refresh();status('Payment received. Image limit added to your account.')}catch(e){status(e.message,true)}}});checkout.on('payment.failed',()=>status('Payment was not completed',true));checkout.open()
- }catch(e){status(e.message,true)}}
-for(let btn of document.querySelectorAll('.planBtn'))btn.onclick=()=>pay(btn.dataset.plan);
-$('customPay').onclick=()=>{let amount=Number($('customAmount').value);if(!Number.isInteger(amount)||amount<100||amount>10000){status('Enter a top-up between ₹100 and ₹10,000',true);return}pay('custom',amount)};
-async function start(){try{config=await api('config');await refresh({quiet:true});if(!config.login)status('Site setup pending: configure MSG91, Supabase and SESSION_SECRET in Cloudflare Secrets.',true);else if(!config.ai)status('Login is ready, but image AI key still needs configuration.',true)}catch(e){status('Backend not connected. Deploy through GitHub-linked Cloudflare Pages.',true)}}
-start();
+function renderHistory(){let root=$('historyList');if(!root || !me)return;root.replaceChildren();let list=me.history||[];if(!list.length){root.innerHTML='<div class="empty-card">No generated photos yet. <a href="/create/" style="text-decoration:underline">Create one</a>.</div>';return}
+ for(const j of list){let row=document.createElement('div');row.className='history-row';if(j.status==='completed'){let img=document.createElement('img');img.src='/api/images/'+j.id;img.alt=j.kind+' '+j.side;img.loading='lazy';row.append(img)}let div=document.createElement('div');div.className='row-text';let name=document.createElement('strong'),date=document.createElement('small');name.textContent=j.kind+' — '+j.side;date.textContent=j.status+' · '+new Date(j.created_at).toLocaleString('en-IN');div.append(name,date);row.append(div);if(j.status==='completed'){let btn=document.createElement('button');btn.className='small-download';btn.textContent='Download ↓';btn.onclick=()=>downloadSingle({id:j.id,label:j.kind+' '+j.side});row.append(btn)}root.append(row)}
+}
+function renderPayments(){let root=$('paymentList');if(!root||!me)return;root.replaceChildren();let list=me.payments||[];if(!list.length){root.innerHTML='<div class="empty-card">No payments yet. <a href="/#pricing" style="text-decoration:underline">See pricing</a>.</div>';return}for(const p of list){let row=document.createElement('div');row.className='payment-row';const div=document.createElement('div');div.className='row-text';const a=document.createElement('strong'),b=document.createElement('small');a.textContent='₹'+(p.amount_paise/100).toFixed(0)+' · '+p.plan;b.textContent=p.status+' · '+new Date(p.created_at).toLocaleString('en-IN');div.append(a,b);row.append(div);root.append(row)}}
+// Razorpay: backend creates order and verifies both signature and captured payment.
+async function pay(plan, amount){
+ if(!await ensureLogin(()=>pay(plan,amount)))return;
+ if(!config?.payments)return pageStatus('Razorpay is not configured in Cloudflare.',true);
+ try{pageStatus('Creating secure Razorpay payment order…');const order=await post('payments/order',{plan,amount});
+ if(!window.Razorpay)throw Error('Razorpay checkout failed to load');
+ const checkout=new window.Razorpay({key:order.keyId,amount:order.amount,currency:'INR',order_id:order.orderId,name:'Athave AI',description:'Image credits',prefill:{contact:me.user.phone.slice(2)},theme:{color:'#111418'},handler:async data=>{
+  try{pageStatus('Verifying captured payment…');await post('payments/verify',data);await refresh({required:true});pageStatus('Payment verified. Your image limit has been added.');toast('Top-up successful!')}catch(e){pageStatus('Payment needs verification: '+e.message,true)}
+ }});
+ checkout.on('payment.failed',()=>pageStatus('Payment was not completed.',true));checkout.open();
+ }catch(e){pageStatus(e.message,true)}
+}
+for(const btn of document.querySelectorAll('.pay-btn'))btn.onclick=()=>{
+ const plan=btn.dataset.plan;let amount=null;
+ if(plan==='custom'){amount=Number($('customAmount')?.value);if(!Number.isInteger(amount)||amount<100||amount>10000)return pageStatus('Enter an amount between ₹100 and ₹10,000.',true)}
+ pay(plan,amount)
+};
+async function boot(){
+ try {config=await api('config');await refresh({quiet:true});
+  if(!config.login){toast('Login setup incomplete. Check Cloudflare secrets.',true)}
+  if(page==='results')await populateResults();
+  if(['profile','history','payments'].includes(page)&&!me){if(lastAuthError?.status===401)openLogin();else if(lastAuthError)pageStatus('Could not check account: '+lastAuthError.message,true)}
+ }catch(e){pageStatus('Backend configuration error: '+e.message,true)}
+}
+boot();
