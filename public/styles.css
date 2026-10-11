@@ -83,3 +83,21 @@
  .product-stage .hero-shirt { left:-3%; top:0; width:66%; height:88%; }
  .product-stage .hero-earbud { left:45%; top:31%; width:55%; height:65%; }
 }
+
+/* V7 - reference products, genuine transparency, and uncluttered wallet row */
+.product-stage{position:absolute;inset:0;background:#fff;overflow:hidden}
+.product-stage img{position:absolute;display:block;mix-blend-mode:normal!important;opacity:1!important;filter:none!important;mask:none!important;clip-path:none!important;object-fit:contain;max-width:none}
+.product-stage .hero-shirt{left:0;top:0;width:71%;height:91%;z-index:1}
+.product-stage .hero-earbud{left:39%;top:32%;width:64%;height:68%;z-index:2}
+.generator-bottom{margin-top:24px!important;gap:22px!important;display:flex;flex-direction:column;max-width:660px}
+.generator-bottom .wallet-mini{border:0!important;background:transparent!important;box-shadow:none!important;border-radius:0!important;padding:0!important;margin:0!important;min-height:0!important;display:flex;align-items:center;justify-content:flex-start;column-gap:9px;row-gap:5px;font-size:14px;color:#626b79}
+.generator-bottom .wallet-mini b{font-size:15px;font-weight:800;color:#12161c}
+.generator-bottom .wallet-mini a{margin-left:12px!important;padding:0!important;border:0!important;background:none!important;border-radius:0!important;color:#151719!important;text-decoration:none!important;font-size:14px;font-weight:700;display:inline-flex}
+.generator-bottom .wallet-mini a:hover{text-decoration:underline!important;color:#555c69!important;background:transparent!important}
+.generator-bottom .btn{margin:0!important;min-height:57px}
+.admin-page-header{display:flex;justify-content:space-between;align-items:center;gap:16px}
+.admin-console-label{font-weight:800;color:#1d222a;font-size:13px;letter-spacing:.04em}
+.admin-logout{border:1px solid #dce0e6;background:white;border-radius:10px;padding:10px 15px;font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+.admin-login-help{font-size:12px;color:#9a5b28;line-height:1.5;margin-top:14px}
+.admin-unlock-panel{max-width:510px;margin:30px auto 70px}
+@media(max-width:730px){.product-stage .hero-shirt{left:-4%;top:0;width:73%;height:91%}.product-stage .hero-earbud{left:37%;top:29%;width:67%;height:69%}.generator-bottom{margin-top:21px!important;gap:19px!important}.generator-bottom .wallet-mini{font-size:13px;column-gap:7px}.generator-bottom .wallet-mini a{margin-left:8px!important}.admin-console-label{font-size:11px}.brand img{width:166px;height:57px}}

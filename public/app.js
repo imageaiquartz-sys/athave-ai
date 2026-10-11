@@ -79,8 +79,8 @@ function renderUser() {
  if($('uploadWallet')) $('uploadWallet').textContent=me?.wallet?.balance ?? 'Sign in';
  if($('progressFill')) $('progressFill').style.width=me?.wallet?.purchased ? Math.min(100,100*me.wallet.used/me.wallet.purchased)+'%' : '0%';
  for(const badge of document.querySelectorAll('.header-admin-badge'))show(badge,!!me?.user?.isAdmin);
- if($('adminProfileRow'))show($('adminProfileRow'),!!me?.user?.isAdmin);
- if($('adminVerified'))show($('adminVerified'),!!me?.user?.isAdmin);
+ 
+ 
  if(page==='history') renderHistory();
  if(page==='payments') renderPayments();
 }
@@ -102,7 +102,7 @@ async function loginSuccess() {
   toast('Signed in successfully. Welcome to Athave AI!');
   let callback=postLoginAction;postLoginAction=null;
   if (callback) await callback();
-  else if(page==='admin') await loadAdmin();
+
   else if(page==='profile'||page==='history'||page==='payments') renderUser();
  } catch (e) {
   authStatus('OTP was accepted but the account session did not load: ' + e.message, true);
@@ -276,74 +276,12 @@ if(redeemForm)redeemForm.onsubmit=async event=>{
  try{const data=await post('redeem',{code});await refresh({required:true});$('redeemInput').value='';$('redeemStatus').textContent=`Success! ${data.credits} credits added to your account.`;toast(`${data.credits} image credits added.`)}
  catch(e){$('redeemStatus').textContent=e.message;toast(e.message,true)}finally{button.disabled=false}
 };
-// Admin is enforced by the server's customers.is_admin flag, NOT by hiding UI.
-let adminCustomerOffset=0,adminPaymentOffset=0;
-function adminCell(row,text){const cell=document.createElement('td');cell.textContent=String(text??'—');row.append(cell)}
-function adminRows(id,rows,cols){const body=$(id);if(!body)return;body.replaceChildren();for(const value of rows){const tr=document.createElement('tr');for(const col of cols)adminCell(tr,typeof col==='function'?col(value):value[col]);body.append(tr)}if(!rows.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=cols.length;td.className='admin-empty';td.textContent='Nothing to show yet.';tr.append(td);body.append(tr)}}
-function adminDate(d){return d?new Date(d).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):'—'}
-function adminStatus(text,error=false){const el=$('adminStatus');if(el){el.textContent=text;el.classList.toggle('error',error)}}
-async function adminLoadList(kind,more=false){const isUser=kind==='users';let offset=isUser?adminCustomerOffset:adminPaymentOffset;if(!more)offset=0;
- const data=await api('admin/'+kind+'?offset='+offset);const rows=data.items||[];const root=$(isUser?'adminUsersBody':'adminPaymentsBody');
- if(!more)root.replaceChildren();if(root.querySelector('.admin-empty'))root.replaceChildren();
- for(const r of rows){const tr=document.createElement('tr');
-  if(isUser){for(const value of [r.name,'+'+r.phone,String(r.balance??0),String(r.used??0),adminDate(r.created_at)])adminCell(tr,value)}
-  else{for(const value of ['₹'+(r.amount_paise/100).toFixed(0),r.plan,String(r.credits),r.status,adminDate(r.created_at),r.gateway_order_id])adminCell(tr,value)}
-  root.append(tr);
- }
- if(!root.children.length)adminRows(isUser?'adminUsersBody':'adminPaymentsBody',[],isUser?['','','','','']:['','','','','','']);
- const next=offset+rows.length;if(isUser)adminCustomerOffset=next;else adminPaymentOffset=next;
- const btn=$(isUser?'adminMoreUsers':'adminMorePayments');if(btn)btn.hidden=rows.length<50;
-}
-async function loadAdmin(){
- if(!me?.user?.isAdmin){adminStatus('Admin access is restricted to authorized accounts.',true);show($('adminDashboard'),false);show($('adminUnlockPanel'),false);return;}
- let state;
- try{state=await api('admin/status');}
- catch(e){adminStatus('Admin authorization check failed: '+e.message,true);show($('adminDashboard'),false);show($('adminUnlockPanel'),false);return;}
- if(!state.configured){adminStatus('Add ADMIN_ACCESS_ID to Cloudflare Production Secrets before unlocking admin.',true);show($('adminDashboard'),false);show($('adminUnlockPanel'),true);return;}
- if(!state.unlocked){show($('adminUnlockPanel'),true);show($('adminDashboard'),false);adminStatus('');return;}
- show($('adminUnlockPanel'),false);show($('adminDashboard'),true);adminStatus('Loading…');
- try{const [stats,codes]=await Promise.all([api('admin/overview'),api('admin/codes')]);
-  $('adminTotalUsers').textContent=stats.users??0;$('adminRevenue').textContent='₹'+(Number(stats.revenue_paise||0)/100).toLocaleString('en-IN');
-  $('adminTopups').textContent=stats.paid_orders??0;$('adminRedemptions').textContent=stats.redemptions??0;
-  adminRows('adminCodesBody',codes.items||[],[
-   'label', r=>r.credits+' images',r=>r.uses+'/'+r.max_uses,r=>r.active?'Active':'Disabled',r=>adminDate(r.expires_at),r=>adminDate(r.created_at),()=>''
-  ]);
-  for(const [index,record] of (codes.items||[]).entries()) {
-   const last=$('adminCodesBody').rows[index]?.lastElementChild;if(!last||!record.active)continue;
-   const button=document.createElement('button');button.type='button';button.className='admin-disable';button.textContent='Disable';
-   button.onclick=async()=>{if(!confirm('Disable this redeem code? It cannot be used again.'))return;
-    button.disabled=true;try{await post('admin/codes/disable',{id:record.id});await loadAdmin();adminStatus('Redeem code disabled.')}catch(e){adminStatus(e.message,true);button.disabled=false}}
-   last.replaceChildren(button);
-  }
-  await Promise.all([adminLoadList('users'),adminLoadList('payments')]);adminStatus('');
- }catch(e){adminStatus('Admin dashboard failed to load: '+e.message,true)}
-}
-if($('adminUnlockForm'))$('adminUnlockForm').onsubmit=async event=>{
- event.preventDefault();const button=event.currentTarget.querySelector('button[type=submit]');
- const id=$('adminAccessId').value.trim();if(!id){$('adminUnlockMessage').textContent='Enter your admin ID.';return}
- button.disabled=true;$('adminUnlockMessage').textContent='Checking admin ID…';
- try{
-  await post('admin/unlock',{id});$('adminAccessId').value='';$('adminUnlockMessage').textContent='';
-  await loadAdmin();
- }catch(e){$('adminUnlockMessage').textContent=e.message;toast(e.message,true)}
- finally{button.disabled=false}
-};
-if($('adminMoreUsers'))$('adminMoreUsers').onclick=()=>adminLoadList('users',true).catch(e=>adminStatus(e.message,true));
-if($('adminMorePayments'))$('adminMorePayments').onclick=()=>adminLoadList('payments',true).catch(e=>adminStatus(e.message,true));
-if($('adminCreateCode'))$('adminCreateCode').onsubmit=async event=>{
- event.preventDefault();const form=event.currentTarget;const button=form.querySelector('button[type=submit]');button.disabled=true;adminStatus('Creating code…');
- const label=$('codeLabel').value.trim(),credits=Number($('codeCredits').value),maxUses=Number($('codeMaxUses').value),expiresDays=Number($('codeDays').value);
- try{const data=await post('admin/codes',{label,credits,maxUses,expiresDays});$('newCodeValue').textContent=data.code;show($('adminNewCode'),true);adminStatus('Redeem code created. Copy it now; it will not be shown again.');form.reset();$('codeMaxUses').value=1;$('codeDays').value=30;await loadAdmin();adminStatus('Code created. Copy the code below now; the database stores only its hash.');}
- catch(e){adminStatus(e.message,true)}finally{button.disabled=false}
-};
-if($('copyAdminCode'))$('copyAdminCode').onclick=()=>{const code=$('newCodeValue').textContent; if(navigator.clipboard?.writeText)navigator.clipboard.writeText(code).then(()=>toast('Code copied')).catch(()=>toast('Select the code and copy it.'));else toast('Select the code and copy it.')};
-
 async function boot(){
  try {config=await api('config');await refresh({quiet:true});
   if(!config.login){toast('Login setup incomplete. Check Cloudflare secrets.',true)}
   if(page==='results')await populateResults();
-  if(page==='admin' && me)await loadAdmin();
-  if(['profile','history','payments','admin'].includes(page)&&!me){if(lastAuthError?.status===401)openLogin();else if(lastAuthError)pageStatus('Could not check account: '+lastAuthError.message,true)}
+
+  if(['profile','history','payments'].includes(page)&&!me){if(lastAuthError?.status===401)openLogin();else if(lastAuthError)pageStatus('Could not check account: '+lastAuthError.message,true)}
  }catch(e){pageStatus('Backend configuration error: '+e.message,true)}
 }
 boot();

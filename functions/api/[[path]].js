@@ -1,5 +1,5 @@
 /* Athave AI Cloudflare Pages Function. All secrets live in Pages > Settings > Variables & Secrets. */
-const COOKIE='athave_session', PENDING='athave_pending', OTP_COOKIE='athave_otp_request', ADMIN_COOKIE='athave_admin_unlock', BUCKET='athave-results';
+const COOKIE='athave_session', PENDING='athave_pending', OTP_COOKIE='athave_otp_request', ADMIN_COOKIE='athave_admin_session', BUCKET='athave-results';
 const ALLOWED_KINDS=new Set(['shirt','polo shirt','t-shirt','hoodie','jacket','dress','pants','jeans','shorts','skirt','cap','shoe','bag','product']);
 const GARMENTS=new Set(['shirt','polo shirt','t-shirt','hoodie','jacket','dress','pants','jeans','shorts','skirt','cap']);
 const enc=new TextEncoder();
@@ -14,22 +14,23 @@ async function signSession(env,id){let payload=b64url(enc.encode(JSON.stringify(
 async function readSession(req,env){const token=cookies(req)[COOKIE];if(!token||!env.SESSION_SECRET)return null;let parts=token.split('.');if(parts.length!==2)return null;const expected=await hmac(env.SESSION_SECRET,parts[0]);if(expected!==parts[1])return null;try{let p=JSON.parse(new TextDecoder().decode(unb64url(parts[0])));if(p.exp<=Date.now()||!p.id)return null;return p.id}catch{return null}}
 function setCookie(name,value,age=1209600){return `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${age}; HttpOnly; Secure; SameSite=Lax`}
 function clearCookie(name){return `${name}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`}
-// Admin ID is a second unlock step, never a substitute for an authenticated admin user.
-// Keep ADMIN_ACCESS_ID in Cloudflare Secrets rather than in public JavaScript.
-async function adminGrant(env, userId, sessionToken){
- const payload=b64url(enc.encode(JSON.stringify({id:userId,s:await sha(sessionToken),exp:Date.now()+12*3600*1000})));
- return payload+'.'+await hmac(env.SESSION_SECRET,payload);
+// Separate admin session. WARNING: an ID-only login is weaker than a password/passkey.
+// Set ADMIN_ACCESS_ID as a Cloudflare encrypted secret. Do not expose it in client code.
+async function signAdmin(env){
+ const payload=b64url(enc.encode(JSON.stringify({role:'admin',exp:Date.now()+8*3600*1000,nonce:crypto.randomUUID()})));
+ return payload+'.'+await hmac(env.SESSION_SECRET+':admin:'+env.ADMIN_ACCESS_ID,payload);
 }
-async function hasAdminGrant(req,env,user){
- if(!user?.is_admin||!env.SESSION_SECRET)return false;
- const auth=cookies(req)[COOKIE],token=cookies(req)[ADMIN_COOKIE];
- if(!auth||!token)return false;
+async function hasAdminSession(req,env){
+ if(!env.SESSION_SECRET||!env.ADMIN_ACCESS_ID)return false;
+ const token=cookies(req)[ADMIN_COOKIE];if(!token)return false;
  const [payload,mac,...extra]=token.split('.');if(!payload||!mac||extra.length)return false;
- if(await hmac(env.SESSION_SECRET,payload)!==mac)return false;
- try{
-  const details=JSON.parse(new TextDecoder().decode(unb64url(payload)));
-  return details.id===user.id && details.s===await sha(auth) && details.exp>Date.now();
- }catch{return false}
+ if(await hmac(env.SESSION_SECRET+':admin:'+env.ADMIN_ACCESS_ID,payload)!==mac)return false;
+ try{const data=JSON.parse(new TextDecoder().decode(unb64url(payload)));return data.role==='admin'&&data.exp>Date.now()}catch{return false}
+}
+async function verifyAdminId(env,id){
+ const expected=enc.encode(await sha(env.ADMIN_ACCESS_ID));
+ const incoming=enc.encode(await sha(id));
+ let diff=0;for(let i=0;i<expected.length;i++)diff|=expected[i]^incoming[i];return diff===0;
 }
 function phone(raw){let n=String(raw||'').replace(/\D/g,'');if(n.length===10)n='91'+n;return /^91[6-9][0-9]{9}$/.test(n)?n:null}
 
@@ -214,30 +215,20 @@ export async function onRequest({request,env,params}){
     response.headers.append('set-cookie',clearCookie(ADMIN_COOKIE));
     return response;
   }
-  const user=await current(request,env);if(!user)return err('Please log in with your mobile number',401);
-  if(method==='GET'&&route==='admin/status'){
-    if(!user.is_admin)return err('Admins only',403);
-    return json({authorized:true,unlocked:await hasAdminGrant(request,env,user),configured:!!env.ADMIN_ACCESS_ID});
+  // Admin authentication is completely separate from customer mobile OTP.
+  const isAdminRoute=route==='admin'||route.startsWith('admin/');
+  if(isAdminRoute){
+   if(method==='GET'&&route==='admin/status')return json({configured:!!(env.ADMIN_ACCESS_ID&&env.SESSION_SECRET),unlocked:await hasAdminSession(request,env)});
+   if(method==='POST'&&route==='admin/login'){
+    if(!env.ADMIN_ACCESS_ID||!env.SESSION_SECRET)return err('Add ADMIN_ACCESS_ID and SESSION_SECRET as Cloudflare secrets',503);
+    const body=await request.json().catch(()=>({}));const id=String(body.id||'');
+    if(!id||id.length>80||!await verifyAdminId(env,id))return err('Invalid admin ID',401);
+    return json({unlocked:true},200,{'set-cookie':setCookie(ADMIN_COOKIE,await signAdmin(env),8*3600)});
+   }
+   if(method==='POST'&&route==='admin/logout')return json({locked:true},200,{'set-cookie':clearCookie(ADMIN_COOKIE)});
+   if(!await hasAdminSession(request,env))return err('Unlock the admin panel to continue',401);
   }
-  if(method==='POST'&&route==='admin/unlock'){
-    if(!user.is_admin)return err('Admins only',403);
-    if(!env.ADMIN_ACCESS_ID)return err('Admin ID is not configured in Cloudflare Secrets',503);
-    const body=await request.json(),candidate=String(body.id||'');
-    if(candidate.length<1||candidate.length>80)return err('Enter an admin ID');
-    // Constant-time fixed-length hashes to avoid leaking how much of the ID matches.
-    const good=enc.encode(await sha(env.ADMIN_ACCESS_ID));
-    const got=enc.encode(await sha(candidate));
-    let difference=0;for(let i=0;i<good.length;i++)difference|=good[i]^got[i];
-    if(difference!==0)return err('Incorrect admin ID',403);
-    const token=await adminGrant(env,user.id,cookies(request)[COOKIE]);
-    return json({unlocked:true},200,{'set-cookie':setCookie(ADMIN_COOKIE,token,12*3600)});
-  }
-  if(method==='POST'&&route==='admin/lock'){
-    if(!user.is_admin)return err('Admins only',403);
-    return json({locked:true},200,{'set-cookie':clearCookie(ADMIN_COOKIE)});
-  }
-  if((route.startsWith('admin/')||route==='admin')&&!await hasAdminGrant(request,env,user))
-    return err('Unlock admin dashboard with your admin ID',403);
+  const user=isAdminRoute?{id:null,is_admin:true}:await current(request,env);if(!user)return err('Please log in with your mobile number',401);
   if(method==='GET'&&route==='ai/check'){
    if(!env.GEMINI_API_KEY)return json({configured:false,model:env.GEMINI_IMAGE_MODEL||'gemini-3.1-flash-lite-image',message:'GEMINI_API_KEY is missing'});
    const model=env.GEMINI_IMAGE_MODEL||'gemini-3.1-flash-lite-image';
@@ -366,7 +357,7 @@ export async function onRequest({request,env,params}){
       const parts=[];for(let i=0;i<3;i++){const bytes=crypto.getRandomValues(new Uint8Array(4));parts.push([...bytes].map(x=>'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[x%32]).join(''))}
       const code='ATH-'+parts.join('-');const codeHash=await sha(code);
       const expiry=new Date(Date.now()+expiresDays*86400000).toISOString();
-      await tbl(env,'POST','redeem_codes','',{code_hash:codeHash,label,credits,max_uses:maxUses,expires_at:expiry,created_by:user.id},{headers:{prefer:'return=minimal'}});
+      await tbl(env,'POST','redeem_codes','',{code_hash:codeHash,label,credits,max_uses:maxUses,expires_at:expiry,created_by:null},{headers:{prefer:'return=minimal'}});
       return json({created:true,code,credits,maxUses,expires_at:expiry});
     }
   }
