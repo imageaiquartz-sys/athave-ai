@@ -1,3 +1,7 @@
+# Athave AI V12 – Google Search favicon fix (FULL WEBSITE)
+
+See `FAVICON-GOOGLE-SEARCH-DEPLOY.md` for uploading the full site and Google recrawl steps.
+
 # Athave AI V11 – PWA + safer Razorpay payments
 
 Full existing Athave AI V10 SEO website, customer login, selective generation and separate admin preserved.
