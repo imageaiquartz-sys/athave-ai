@@ -45,9 +45,12 @@ async function openCustomer(id){selectedCustomerId=id;$('customerDetail').hidden
  right.append(form,message);row.append(pic,right);root.append(row)}
  $('customerDetail').scrollIntoView({behavior:'smooth',block:'start'});
  }catch(e){status(e.message,true)}}
-$('unlockForm').onsubmit=async e=>{e.preventDefault();const id=$('adminId').value.trim(),button=e.currentTarget.querySelector('button');button.disabled=true;try{await post('admin/login',{id});$('adminId').value='';view(true);await loadCustomers()}catch(e){status(e.message,true,$('unlockError'))}finally{button.disabled=false}};
+$('unlockForm').onsubmit=async e=>{e.preventDefault();const id=$('adminId').value.trim(),button=e.currentTarget.querySelector('button');button.disabled=true;try{await post('admin/login',{id});$('adminId').value='';view(true);await loadCustomers();await loadHeroAdmin()}catch(e){status(e.message,true,$('unlockError'))}finally{button.disabled=false}};
 $('adminLock').onclick=async()=>{await post('admin/logout',{}).catch(()=>{});view(false);status('Admin locked.')};
 $('closeDetail').onclick=()=>{$('customerDetail').hidden=true;selectedCustomerId=null};
 $('refreshAdmin').onclick=async()=>{try{await loadCustomers();if(selectedCustomerId)await openCustomer(selectedCustomerId)}catch(e){status(e.message,true)}};
 $('searchCustomers').oninput=renderCustomers;
-(async()=>{try{const state=await req('admin/status');view(state.unlocked);if(state.unlocked)await loadCustomers();else if(!state.configured)status('Configure ADMIN_ACCESS_ID and SESSION_SECRET in Cloudflare first.',true)}catch(e){view(false);status(e.message,true)}})();
+(async()=>{try{const state=await req('admin/status');view(state.unlocked);if(state.unlocked){await loadCustomers();await loadHeroAdmin()}else if(!state.configured)status('Configure ADMIN_ACCESS_ID and SESSION_SECRET in Cloudflare first.',true)}catch(e){view(false);status(e.message,true)}})();
+
+async function loadHeroAdmin(){try{const state=await req('manual/admin/hero');$('heroMode').value=state.mode==='default'?'default':state.mode;$('heroPreview').src=state.imageUrl||'/assets/athave-shirt.webp'}catch(e){status(e.message,true,$('heroAdminStatus'))}}
+$('heroForm').onsubmit=async e=>{e.preventDefault();const mode=$('heroMode').value,file=$('heroInput').files[0],button=e.currentTarget.querySelector('button[type=submit]');if(mode!=='default'&&!file)return status('Choose an image before saving.',true,$('heroAdminStatus'));button.disabled=true;try{const f=new FormData();f.set('mode',mode);if(file)f.set('file',file);await req('manual/admin/hero',{method:'POST',body:f});$('heroInput').value='';await loadHeroAdmin();status('Homepage image saved. New visitors will see it.',false,$('heroAdminStatus'))}catch(err){status(err.message,true,$('heroAdminStatus'))}finally{button.disabled=false}};

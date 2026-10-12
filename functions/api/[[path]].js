@@ -438,6 +438,7 @@ async function hmacHex(secret,message){let key=await crypto.subtle.importKey('ra
 
 // V16 no-login manual-photo service. Separate signed HttpOnly guest cookie; never expose service key.
 const MANUAL_COOKIE='athave_manual_guest', MANUAL_BUCKET='athave-manual';
+const HERO_KEY='home-hero';
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 async function guestSession(req,env){
  const token=cookies(req)[MANUAL_COOKIE];if(!token||!env.SESSION_SECRET)return null;
@@ -520,34 +521,62 @@ async function manualAi(env,user,data){
  await tbl(env,'POST','manual_ai_images','',{id,customer_id:user.id,object_path:key,mime_type:type,prompt:message},{headers:{prefer:'return=minimal'}});
  return json({reply:reply||'Your image is ready.',imageId:id});
 }
+async function manualAccount(req,env){
+ const account=await current(req,env);
+ if(!account)return null;
+ let rows=await tbl(env,'GET','manual_customers',`?account_customer_id=eq.${encodeURIComponent(account.id)}&select=id,display_name,contact,account_customer_id`);
+ if(rows?.length)return rows[0];
+ // One-time V16 migration: link the workspace controlled by this device AFTER OTP verification.
+ // A workspace already linked to another account must never be transferred.
+ const legacy=await guestUser(req,env);
+ if(legacy){
+  const linked=await tbl(env,'GET','manual_customers',`?id=eq.${legacy.id}&select=id,account_customer_id`);
+  if(linked?.length&&!linked[0].account_customer_id){
+   await tbl(env,'PATCH','manual_customers',`?id=eq.${legacy.id}&account_customer_id=is.null`,{account_customer_id:account.id,display_name:legacy.display_name.startsWith('Customer ')?account.name:legacy.display_name},{headers:{prefer:'return=minimal'}});
+   rows=await tbl(env,'GET','manual_customers',`?account_customer_id=eq.${encodeURIComponent(account.id)}&select=id,display_name,contact,account_customer_id`);
+   if(rows?.length)return rows[0];
+  }
+ }
+ const id=crypto.randomUUID();
+ try{await tbl(env,'POST','manual_customers','',{id,display_name:account.name||'Athave customer',contact:'',account_customer_id:account.id},{headers:{prefer:'return=minimal'}})}
+ catch(e){
+  // Another tab may have created the workspace concurrently.
+  const existing=await tbl(env,'GET','manual_customers',`?account_customer_id=eq.${encodeURIComponent(account.id)}&select=id,display_name,contact,account_customer_id`);
+  if(existing?.length)return existing[0];throw e;
+ }
+ return {id,display_name:account.name||'Athave customer',contact:'',account_customer_id:account.id};
+}
+async function heroSetting(env){
+ const items=await tbl(env,'GET','manual_site_settings',`?id=eq.${HERO_KEY}&select=mode,object_path,mime_type,updated_at`);
+ return items?.[0]||null;
+}
 async function handleManual(req,env,isAdmin){
  const method=req.method.toUpperCase(),url=new URL(req.url),route=url.pathname.replace(/^\/api\/manual\/?/,'');
  if(!env.SESSION_SECRET||!env.SUPABASE_URL||!env.SUPABASE_SERVICE_ROLE_KEY)return err('Manual service configuration is incomplete',503);
  const admin=route.startsWith('admin/');
  if(admin&&!isAdmin)return err('Unlock the admin dashboard first',401);
- let user=null;if(!admin&&route!=='start'&&route!=='recover'){
-  user=await guestUser(req,env);if(!user)return err('This device has no order session. Open My uploads to create one.',401);
+ if(route==='hero'&&method==='GET'){
+  const setting=await heroSetting(env);
+  return json({mode:setting?.mode||'default',imageUrl:setting?.object_path?'/api/manual/hero/image?v='+encodeURIComponent(setting.updated_at):null});
+ }
+ if(route==='hero/image'&&method==='GET'){
+  const setting=await heroSetting(env);
+  if(!setting?.object_path)return err('No custom image',404);
+  const r=await manualFileFromStorage(env,setting.object_path,setting.mime_type);
+  r.headers.set('Cache-Control','public, max-age=60');return r;
+ }
+ let user=null;
+ if(!admin && route!=='start'){
+  user=await manualAccount(req,env);
+  if(!user)return err('Sign in with your mobile number to continue',401);
  }
  if(route==='start'&&method==='POST'){
-  let existing=await guestUser(req,env);if(existing)return json({customer:existing,entitlement:await guestEntitlement(env,existing.id),new:false});
-  const id=crypto.randomUUID(),recovery='ATV-'+Array.from(crypto.getRandomValues(new Uint8Array(20)),x=>x.toString(16).padStart(2,'0')).join('').toUpperCase();
-  const name='Customer '+id.slice(0,8).toUpperCase();
-  await tbl(env,'POST','manual_customers','',{id,display_name:name,recovery_hash:await sha(recovery)},{headers:{prefer:'return=minimal'}});
-  return json({customer:{id,display_name:name,contact:''},entitlement:{active:false,uploadCap:0,used:0,remaining:0},recoveryKey:recovery,new:true},200,{'set-cookie':await makeGuestCookie(env,id)});
+  const linked=await manualAccount(req,env);
+  if(!linked)return err('Sign in with OTP to access your workspace',401);
+  return json({customer:linked,entitlement:await guestEntitlement(env,linked.id),new:false});
  }
- if(route==='recover'&&method==='POST'){
-  const {code}=await req.json();const value=String(code||'').trim().toUpperCase();
-  if(!/^ATV-[0-9A-F]{40}$/.test(value))return err('Invalid recovery code',400);
-  const rows=await tbl(env,'GET','manual_customers',`?recovery_hash=eq.${encodeURIComponent(await sha(value))}&select=id,display_name,contact`);
-  if(!rows?.length)return err('Recovery code not found',404);
-  return json({customer:rows[0],restored:true},200,{'set-cookie':await makeGuestCookie(env,rows[0].id)});
- }
+ if(route==='recover'||route==='rotate-recovery')return err('Use mobile OTP to access your orders',410);
  if(route==='status'&&method==='GET'){await rpc(env,'manual_refund_stale_uploads',{p_customer:user.id});return json({customer:user,entitlement:await guestEntitlement(env,user.id)});}
- if(route==='rotate-recovery'&&method==='POST'){
-  const key='ATV-'+Array.from(crypto.getRandomValues(new Uint8Array(20)),x=>x.toString(16).padStart(2,'0')).join('').toUpperCase();
-  await tbl(env,'PATCH','manual_customers',`?id=eq.${user.id}`,{recovery_hash:await sha(key),updated_at:new Date().toISOString()},{headers:{prefer:'return=minimal'}});
-  return json({recoveryKey:key});
- }
 
  if(route==='update-customer'&&method==='POST'){
   const data=await req.json(),name=String(data.name||'').trim().slice(0,70),contact=String(data.contact||'').trim().slice(0,90);
@@ -556,6 +585,7 @@ async function handleManual(req,env,isAdmin){
   return json({saved:true});
  }
  if(route==='uploads'&&method==='GET')return json({uploads:await manualUploadList(env,user.id)});
+ if(route==='payments'&&method==='GET'){const records=await tbl(env,'GET','manual_payments',`?customer_id=eq.${user.id}&select=id,kind,amount_paise,status,created_at,paid_at&order=created_at.desc&limit=100`);return json({payments:records||[]});}
  if(route==='upload'&&method==='POST'){
   const f=await req.formData(),file=f.get('file');const info=validManualImage(file,8*1048576);
   const batch=String(f.get('batch')||'');const batchId=UUID_RE.test(batch)?batch:crypto.randomUUID();
@@ -648,6 +678,27 @@ async function handleManual(req,env,isAdmin){
    return manualFileFromStorage(env,rows[0].object_path,rows[0].mime_type);
   }
   return err('Unknown file type');
+ }
+ if(route==='admin/hero'&&method==='GET'){
+  const setting=await heroSetting(env);
+  return json({mode:setting?.mode||'default',imageUrl:setting?.object_path?'/api/manual/hero/image?v='+encodeURIComponent(setting.updated_at):null});
+ }
+ if(route==='admin/hero'&&method==='POST'){
+  const form=await req.formData();
+  const mode=String(form.get('mode')||'');
+  if(!['transparent','background','default'].includes(mode))return err('Choose a valid display mode');
+  if(mode==='default'){
+   await tbl(env,'POST','manual_site_settings','?on_conflict=id',{id:HERO_KEY,mode:'default',object_path:null,mime_type:null,updated_at:new Date().toISOString()},{headers:{prefer:'resolution=merge-duplicates,return=minimal'}});
+   return json({saved:true,mode:'default'});
+  }
+  const file=form.get('file');
+  if(!file||typeof file.arrayBuffer!=='function')return err('Choose the homepage image');
+  const info=validManualImage(file,8*1048576);
+  const objectPath=`site/hero/${crypto.randomUUID()}.${info.suffix}`;
+  const saved=await supa(env,'POST',`/storage/v1/object/${MANUAL_BUCKET}/${objectPath}`,await file.arrayBuffer(),{raw:true,headers:{'content-type':file.type,'x-upsert':'false'},response:true});
+  if(!saved.ok)throw Error('Homepage image upload failed');
+  await tbl(env,'POST','manual_site_settings','?on_conflict=id',{id:HERO_KEY,mode,object_path:objectPath,mime_type:file.type,updated_at:new Date().toISOString()},{headers:{prefer:'resolution=merge-duplicates,return=minimal'}});
+  return json({saved:true,mode,imageUrl:'/api/manual/hero/image?v='+Date.now()});
  }
  if(route==='admin/deliver'&&method==='POST'){
   const form=await req.formData(),id=String(form.get('uploadId')||'');if(!UUID_RE.test(id))return err('Invalid upload');
