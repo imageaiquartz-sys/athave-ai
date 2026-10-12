@@ -604,6 +604,11 @@ async function handleManual(req,env,isAdmin){
   return json({saved:true});
  }
  if(route==='uploads'&&method==='GET')return json({uploads:await manualUploadList(env,user.id)});
+ if(route==='gallery/version'&&method==='GET'){
+  // Only newest delivered ID is needed to determine if a gallery has changed.
+  const rows=await tbl(env,'GET','manual_customer_gallery',`?customer_id=eq.${encodeURIComponent(user.id)}&select=id&order=created_at.desc,id.desc&limit=1`);
+  return json({revision:rows?.[0]?.id||'empty'});
+ }
  if(route==='gallery/results'&&method==='GET'){
   const offset=Math.max(0,Math.min(100000,Number.parseInt(url.searchParams.get('offset')||'0',10)||0));
   const count=30;
@@ -630,7 +635,7 @@ async function handleManual(req,env,isAdmin){
   if(kind==='source'){
    const rows=await tbl(env,'GET','manual_uploads',`?id=eq.${id}&customer_id=eq.${user.id}&select=source_path,mime_type`);
    if(!rows?.[0]?.source_path)return err('Image not found',404);
-   return manualFileFromStorage(env,rows[0].source_path,rows[0].mime_type);
+   return manualFileFromStorage(env,rows[0].source_path,rows[0].mime_type,url.searchParams.get('download')==='1'?'athave-original-'+id+'.'+(rows[0].mime_type==='image/png'?'png':rows[0].mime_type==='image/webp'?'webp':'jpg'):'');
   }
   if(kind==='result'){
    const rows=await tbl(env,'GET','manual_outputs',`?id=eq.${id}&select=id,upload_id,object_path,filename,mime_type`);
@@ -714,12 +719,12 @@ async function handleManual(req,env,isAdmin){
   if(kind==='source'){
    const rows=await tbl(env,'GET','manual_uploads',`?id=eq.${id}&select=source_path,mime_type`);
    if(!rows?.[0]?.source_path)return err('File not found',404);
-   return manualFileFromStorage(env,rows[0].source_path,rows[0].mime_type);
+   return manualFileFromStorage(env,rows[0].source_path,rows[0].mime_type,url.searchParams.get('download')==='1'?'athave-original-'+id+'.'+(rows[0].mime_type==='image/png'?'png':rows[0].mime_type==='image/webp'?'webp':'jpg'):'');
   }
   if(kind==='result'){
-   const rows=await tbl(env,'GET','manual_outputs',`?id=eq.${id}&select=object_path,mime_type`);
+   const rows=await tbl(env,'GET','manual_outputs',`?id=eq.${id}&select=object_path,mime_type,filename`);
    if(!rows?.length)return err('File not found',404);
-   return manualFileFromStorage(env,rows[0].object_path,rows[0].mime_type);
+   return manualFileFromStorage(env,rows[0].object_path,rows[0].mime_type,url.searchParams.get('download')==='1'?rows[0].filename:'');
   }
   return err('Unknown file type');
  }
@@ -766,15 +771,26 @@ async function handleManual(req,env,isAdmin){
  }
  if(route==='admin/deliver'&&method==='POST'){
   const form=await req.formData(),id=String(form.get('uploadId')||'');if(!UUID_RE.test(id))return err('Invalid upload');
-  const file=form.get('file'),info=validManualImage(file,12*1048576);
-  const source=(await tbl(env,'GET','manual_uploads',`?id=eq.${id}&status=in.(processing,completed)&select=id,customer_id`))?.[0];
-  if(!source)return err('Upload unavailable',404);
-  const path=`${source.customer_id}/${id}/result/${crypto.randomUUID()}.${info.suffix}`;
-  const saved=await supa(env,'POST',`/storage/v1/object/${MANUAL_BUCKET}/${path}`,await file.arrayBuffer(),{raw:true,headers:{'content-type':file.type,'x-upsert':'false'},response:true});
-  if(!saved.ok)throw Error('Result image upload failed');
-  await tbl(env,'POST','manual_outputs','',{upload_id:id,object_path:path,filename:info.fileName,mime_type:file.type},{headers:{prefer:'return=minimal'}});
-  await tbl(env,'PATCH','manual_uploads',`?id=eq.${id}`,{status:'completed',updated_at:new Date().toISOString()},{headers:{prefer:'return=minimal'}});
-  return json({delivered:true});
+  const files=form.getAll('file');if(!files.length||files.length>8)return err('Select 1 to 8 finished images');
+  let totalBytes=0;const infos=files.map(file=>{const info=validManualImage(file,12*1048576);totalBytes+=file.size;return info});
+  if(totalBytes>32*1048576)return err('Total delivery size must be under 32 MB');
+  const claimId=crypto.randomUUID();
+  // Claim one processing order, preventing repeated submissions during concurrent admin requests.
+  const claimed=await rpc(env,'manual_claim_delivery',{p_upload:id,p_claim:claimId});
+  if(!claimed)return err('Already delivered or being delivered. Refresh the order queue.',409);
+  try{
+   const source=(await tbl(env,'GET','manual_uploads',`?id=eq.${id}&status=eq.processing&select=id,customer_id`))?.[0];
+   if(!source)throw Error('This order is no longer awaiting delivery');
+   const records=[];
+   for(let i=0;i<files.length;i++){
+    const file=files[i],info=infos[i],path=`${source.customer_id}/${id}/result/${crypto.randomUUID()}.${info.suffix}`;
+    const saved=await supa(env,'POST',`/storage/v1/object/${MANUAL_BUCKET}/${path}`,await file.arrayBuffer(),{raw:true,headers:{'content-type':file.type,'x-upsert':'false'},response:true});
+    if(!saved.ok)throw Error('Result upload failed for '+info.fileName);
+    records.push({object_path:path,filename:info.fileName,mime_type:file.type});
+   }
+   await rpc(env,'manual_complete_delivery',{p_upload:id,p_claim:claimId,p_files:records});
+   return json({delivered:true,count:records.length});
+  }catch(ex){await rpc(env,'manual_release_delivery',{p_upload:id,p_claim:claimId}).catch(()=>{});throw ex}
  }
  return err('Unknown manual service route',404);
 }

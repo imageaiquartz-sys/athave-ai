@@ -21,3 +21,13 @@
 .admin-access-bar strong{font-size:16px;color:#47331d}.admin-access-bar p{color:#81725c;margin:5px 0 0;font-size:12px;line-height:1.5}
 .admin-free-pill{border-radius:50px;background:#deeedf;color:#357447;font-size:10px;font-weight:850;padding:6px 10px}
 @media(max-width:600px){.admin-access-bar{align-items:stretch;flex-direction:column;gap:13px}.admin-access-bar button{width:100%}}
+
+/* V23: centered uploads, independent delivered history, clear download controls. */
+.admin-loader{position:fixed!important;inset:0!important;width:100%!important;height:100%!important;border:0!important;border-radius:0!important;background:rgba(255,255,255,.68)!important;backdrop-filter:blur(4px);box-shadow:none!important;z-index:9999!important;display:flex!important;flex-direction:column;align-items:center!important;justify-content:center!important;gap:12px!important;font-size:14px!important}
+.admin-loader .m-dots{display:flex;gap:6px;justify-content:center}
+.admin-link-pair{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.admin-file-list{display:flex;flex-wrap:wrap;align-items:center;gap:9px}
+.admin-file-list a{display:inline-flex;min-height:35px;align-items:center;padding:9px 12px;text-decoration:none}
+#searchHistory{margin:0 0 20px}
+#tab-history .admin-customers{margin-top:14px}
+@media(max-width:650px){.admin-tabs{grid-template-columns:repeat(3,minmax(0,1fr))}.admin-tab{padding:9px 5px!important;font-size:11px!important}.admin-link-pair{gap:5px}.admin-file-list a{font-size:11px}}

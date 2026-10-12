@@ -189,3 +189,42 @@ body[data-page="ai"] .m-ai-tools{flex-wrap:nowrap}
 }
 @media(max-width:370px){.m-logo img{width:150px}.m-links a{font-size:11.5px}.m-gallery-promo strong{font-size:16px}}
 @media(max-height:530px){body[data-page="ai"] .m-nav{height:62px!important;grid-template-rows:62px;display:flex;gap:10px}body[data-page="ai"] .m-links{display:flex;padding:2px}body[data-page="ai"] .m-links a{padding:7px 8px;font-size:11px}body[data-page="ai"] .m-logo img{width:116px}body[data-page="ai"] #aiPrompt{min-height:32px;height:36px}body[data-page="ai"] .m-ai-compose{padding:5px 9px}body[data-page="ai"] .m-ai-mini-note{font-size:10px}}
+
+
+/* Athave AI V23: flat navigation, white opening splash, safe mobile Studio viewport. */
+html,body{background-color:#fff;color-scheme:light}
+.m-header,.m-nav{background:#fff!important}
+.m-links,.m-links a,.m-links a[aria-current="page"]{background:transparent!important;box-shadow:none!important;border:none!important}
+.m-links a{display:inline-flex;align-items:center;justify-content:center;gap:7px;border-radius:0!important}
+.m-links a::before{content:"";width:5px;height:5px;background:#b28a59;border-radius:50%;display:inline-block;flex:0 0 5px}
+.m-links a[aria-current="page"]{color:#715333;font-weight:850}
+.m-logo img{background:#fff}
+.m-upload-app{padding-top:10px!important}
+.m-upload-shortcut{margin-top:4px}
+.athave-upload-overlay{position:fixed;inset:0;z-index:99999;display:grid;place-items:center;padding:18px;background:rgba(255,255,255,.66);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}
+.athave-upload-overlay[hidden]{display:none!important}
+.athave-upload-progress{width:min(330px,100%);display:flex;align-items:center;flex-direction:column;text-align:center;gap:15px;padding:27px 22px;border:1px solid #e5d0b5;border-radius:20px;background:white;box-shadow:0 22px 60px #4b321925;color:#634728}
+.athave-upload-progress .m-dots{display:flex;align-items:center;justify-content:center;gap:5px}
+.athave-upload-progress strong{font-size:16px}.athave-upload-progress small{font-size:12px;color:#978570;line-height:1.5}
+body[data-page="ai"]{height:var(--athave-visible-height,100dvh)!important;max-height:none!important;min-height:0!important;overflow-y:auto!important;overscroll-behavior-y:contain;grid-template-rows:auto minmax(0,1fr)!important}
+body[data-page="ai"] .m-ai-page{min-height:0!important;max-height:100%!important;height:100%!important;overflow:hidden!important;overscroll-behavior:contain;}
+body[data-page="ai"] .m-ai-box{min-height:0!important;max-height:100%!important;overflow:hidden!important;}
+body[data-page="ai"] .m-ai-thread{flex:1 1 0!important;min-height:0!important;overflow-y:auto!important;overflow-x:hidden!important;-webkit-overflow-scrolling:touch;}
+body[data-page="ai"] .m-ai-compose{flex:0 0 auto!important;max-height:min(46vh,290px);overflow-y:auto;overscroll-behavior:contain;}
+body[data-page="ai"] #aiPrompt{resize:none!important;max-height:76px!important;}
+body[data-page="ai"] .m-ai-mini-note{flex:0 0 auto!important}
+@media (max-width:700px){
+ .m-links{background:transparent!important;border:0!important}
+ .m-links a{gap:4px;padding:8px 0!important;font-size:12px!important}
+ .m-links a::before{width:4px;height:4px;flex-basis:4px}
+ body[data-page="ai"] .m-nav{height:99px!important}
+ body[data-page="ai"] .m-ai-page{padding-bottom:max(3px,env(safe-area-inset-bottom))!important;}
+ body[data-page="ai"] .m-ai-compose{padding:8px 10px!important;max-height:42vh!important}
+ body[data-page="ai"] .m-ai-thread{padding:10px 12px!important}
+ body[data-page="ai"] #aiPrompt{min-height:32px!important;height:46px;max-height:64px!important}
+ body[data-page="ai"] .m-ai-toolbar{align-items:center;gap:3px!important}
+ body[data-page="ai"] .m-ai-tools{gap:4px!important}
+ body[data-page="ai"] .m-tool,body[data-page="ai"] .m-mode-button{min-height:38px!important;padding:7px 7px!important;font-size:10.5px!important}
+ body[data-page="ai"] .m-ai-send-button{min-height:38px!important}
+}
+@media (max-height:480px){body[data-page="ai"] .m-nav{height:55px!important}body[data-page="ai"] .m-ai-compose{padding:5px!important}body[data-page="ai"] .m-ai-mini-note{font-size:9px}}

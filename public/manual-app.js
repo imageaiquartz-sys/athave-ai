@@ -4,16 +4,22 @@ const API='/api/manual/';
 const page=document.body.dataset.page;
 let customer=null, entitlement=null, uploadFiles=[], uploadBusy=false, aiFiles=[], aiMessages=[];
 let authUser=null, authAfter=null, authOpen=false, authPendingPhone='', checkoutBusy=false;
-const CACHE_KEYS={auth:'athave_auth_cache_v1',session:'athave_session_cache_v1'};
+const CACHE_KEYS={auth:'athave_auth_cache_v1',session:'athave_session_cache_v1',gallery:'athave_customer_gallery_v23_'};
 const readCache=key=>{try{return JSON.parse(localStorage.getItem(key)||'null')}catch{return null}};
 const writeCache=(key,val)=>{try{localStorage.setItem(key,JSON.stringify(val))}catch{}};
 const clearCache=key=>{try{localStorage.removeItem(key)}catch{}};
 function hydrateCachedState(){const a=readCache(CACHE_KEYS.auth),s=readCache(CACHE_KEYS.session); if(a&&a.user){authUser=a.user;} if(s){customer=s.customer||customer; entitlement=s.entitlement||entitlement;}}
 const msg=(message,error=false,id='uploadMessage')=>{const node=$(id)||$('appToast');if(!node)return;node.textContent=message;node.classList.toggle('error',error);node.hidden=false};
 let loadingRequests=0;
+let uploadOverlayActive=false;
+function uploadOverlay(active,text="Uploading your photos…"){
+ let box=$("fullUploadLoader");if(!box){box=document.createElement("div");box.id="fullUploadLoader";box.className="athave-upload-overlay";box.hidden=true;box.setAttribute("role","status");box.setAttribute("aria-live","polite");box.innerHTML='<div class="athave-upload-progress"><span class="m-dots" aria-hidden="true"><i></i><i></i><i></i></span><strong id="fullUploadText">Uploading photos…</strong><small>Keep this page open until your photos are submitted.</small></div>';document.body.append(box)}
+ uploadOverlayActive=active;box.hidden=!active;if(active)$("fullUploadText").textContent=text;
+}
+
 function loadingVisual(active){
  let loader=$('customerLoader');if(!loader){loader=document.createElement('div');loader.id='customerLoader';loader.className='customer-loader';loader.setAttribute('role','status');loader.setAttribute('aria-label','Loading');loader.innerHTML='<span class="m-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>Processing…</span>';loader.hidden=true;document.body.append(loader)}
- loadingRequests=Math.max(0,loadingRequests+(active?1:-1));loader.hidden=loadingRequests===0;
+ loadingRequests=Math.max(0,loadingRequests+(active?1:-1));loader.hidden=uploadOverlayActive||loadingRequests===0;
 }
 async function request(route, init={}){
  loadingVisual(true);
@@ -59,7 +65,7 @@ async function authSuccess(){
  await getAuth();await boot();if(old)await old();
 }
 async function signOut(){
- try{await postPublic('auth/logout',{});authUser=null;customer=null;entitlement=null;clearCache(CACHE_KEYS.auth);clearCache(CACHE_KEYS.session);uploadFiles=[];if($('allUploads'))$('allUploads').replaceChildren();updateProfileAuth();location.href='/profile/'}catch(e){msg(e.message,true,'profileStatus')}
+ try{await postPublic('auth/logout',{});if(customer?.id){clearCache(CACHE_KEYS.gallery+customer.id);if('caches' in window)await caches.delete('athave-gallery-previews-v23-'+customer.id).catch(()=>{});}authUser=null;customer=null;entitlement=null;clearCache(CACHE_KEYS.auth);clearCache(CACHE_KEYS.session);uploadFiles=[];if($('allUploads'))$('allUploads').replaceChildren();updateProfileAuth();location.href='/profile/'}catch(e){msg(e.message,true,'profileStatus')}
 }
 async function postPublic(path,data){const r=await fetch('/api/'+path,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(data)});const j=await r.json().catch(()=>({}));if(!r.ok)throw Error(j.error||'Request failed');return j}
 async function signedInOrPrompt(action){if(authUser||await getAuth())return true;openAuth(action);return false}
@@ -134,30 +140,63 @@ function drawUploads(root,list){if(!root)return;root.replaceChildren();if(!list.
  }
 }
 async function loadUploads(){const response=await request('uploads');drawUploads($('allUploads'),response.uploads);drawUploads($('recentUploads'),response.uploads.slice(0,4));}
-let galleryNextOffset=0,galleryLoading=false;
+let galleryNextOffset=0,galleryLoading=false,galleryItems=[],galleryRevision='';
+let galleryObserver=null;const galleryObjectUrls=[];
+async function galleryCachedPreview(img,src){
+ const uid=customer?.id;if(!uid){img.src=src;return}
+ const cacheName='athave-gallery-previews-v23-'+uid;
+ try{
+  if(!('caches' in window)){img.src=src;return}
+  const cache=await caches.open(cacheName);let response=await cache.match(src);
+  if(!response){
+   const remote=await fetch(src,{credentials:'same-origin',cache:'no-store'});if(!remote.ok)throw Error('Preview unavailable');
+   response=remote.clone();try{await cache.put(src,remote)}catch{}
+   // Keep storage bounded to 40 recently loaded photos.
+   const keys=await cache.keys();if(keys.length>40)await Promise.all(keys.slice(0,keys.length-40).map(key=>cache.delete(key)));
+  }
+  if(!img.isConnected)return;const uri=URL.createObjectURL(await response.blob());galleryObjectUrls.push(uri);img.src=uri;
+ }catch{if(img.isConnected)img.src=src}
+}
+
+function galleryKey(){return customer?.id?CACHE_KEYS.gallery+customer.id:null}
+function cachedGallery(){const k=galleryKey();return k?readCache(k):null}
+function storeGallery(){const k=galleryKey();if(k)writeCache(k,{revision:galleryRevision,items:galleryItems.slice(0,250),nextOffset:galleryNextOffset,updatedAt:Date.now()})}
+function drawCustomerGallery(){
+ const root=$('galleryGrid'),more=$('galleryMore');if(!root)return;
+ if(galleryObserver)galleryObserver.disconnect();galleryObjectUrls.splice(0).forEach(uri=>URL.revokeObjectURL(uri));
+ galleryObserver='IntersectionObserver' in window?new IntersectionObserver(entries=>{for(const entry of entries){if(!entry.isIntersecting)continue;galleryObserver?.unobserve(entry.target);galleryCachedPreview(entry.target,entry.target.dataset.previewSrc)}},{rootMargin:'180px'}):null;
+ root.replaceChildren();if(!galleryItems.length)root.innerHTML='<div class="m-empty">Your finished photos will appear here as soon as our team delivers them. <a class="m-link" href="/create/">Upload photos →</a></div>';
+ for(const item of galleryItems){
+  const card=document.createElement('article');card.className='m-gallery-item';
+  const imageLink=document.createElement('a');imageLink.href=imageUrl(item.id,'result')+'&preview=1';imageLink.target='_blank';imageLink.rel='noopener noreferrer';imageLink.className='m-gallery-image';
+  const img=document.createElement('img');img.loading='lazy';img.alt='Finished image: '+item.filename;img.dataset.previewSrc=imageLink.href;imageLink.append(img);if(galleryObserver)galleryObserver.observe(img);else galleryCachedPreview(img,imageLink.href);
+  const footer=document.createElement('div');footer.className='m-gallery-caption',info=document.createElement('div'),title=document.createElement('strong'),meta=document.createElement('small');
+  title.textContent=item.filename;meta.textContent=date(item.created_at);info.append(title,meta);
+  const button=document.createElement('a');button.className='m-gallery-download';button.href=imageUrl(item.id,'result');button.download=item.filename;button.setAttribute('aria-label','Download '+item.filename);button.textContent='Download ↓';
+  footer.append(info,button);card.append(imageLink,footer);root.append(card);
+ }
+ if(more)more.hidden=galleryNextOffset===null;
+}
 async function loadCustomerGallery(reset=false){
  const root=$('galleryGrid'),more=$('galleryMore');if(!root||galleryLoading)return;
- if(reset){galleryNextOffset=0;root.replaceChildren();}
- if(galleryNextOffset===null)return;
- galleryLoading=true;if(more){more.disabled=true;more.textContent='Loading…';}
+ if(reset){
+  const cache=cachedGallery();galleryItems=cache?.items||[];galleryNextOffset=cache?.nextOffset??0;galleryRevision=cache?.revision||'';
+  if(cache)drawCustomerGallery();
+ }
+ if(!reset&&galleryNextOffset===null)return;
+ galleryLoading=true;if(more){more.disabled=true;more.textContent='Checking photos…'}
  try{
-  const data=await request('gallery/results?offset='+galleryNextOffset);
-  const items=data.images||[];
-  if(reset&&!items.length){root.innerHTML='<div class="m-empty">Your finished photos will appear here as soon as our team delivers them. <a class="m-link" href="/create/">Upload photos →</a></div>';}
-  for(const item of items){
-   const card=document.createElement('article');card.className='m-gallery-item';
-   const imageLink=document.createElement('a');imageLink.href=imageUrl(item.id,'result')+'&preview=1';imageLink.target='_blank';imageLink.rel='noopener noreferrer';imageLink.className='m-gallery-image';
-   const image=document.createElement('img');image.src=imageLink.href;image.loading='lazy';image.alt='Finished image: '+item.filename;imageLink.append(image);
-   const footer=document.createElement('div');footer.className='m-gallery-caption';
-   const info=document.createElement('div'),title=document.createElement('strong'),meta=document.createElement('small');title.textContent=item.filename;meta.textContent=date(item.created_at);info.append(title,meta);
-   const button=document.createElement('a');button.className='m-gallery-download';button.href=imageUrl(item.id,'result');button.download=item.filename;button.setAttribute('aria-label','Download '+item.filename);button.textContent='Download ↓';
-   footer.append(info,button);card.append(imageLink,footer);root.append(card);
+  if(reset){
+   // Single tiny metadata check; don't reload gallery rows when admin has not delivered anything.
+   const meta=await request('gallery/version');
+   if(meta.revision===galleryRevision&&cachedGallery()){msg('',false,'galleryMessage');return}
+   galleryItems=[];galleryNextOffset=0;galleryRevision=meta.revision;
   }
-  galleryNextOffset=data.nextOffset??null;if(more)more.hidden=galleryNextOffset===null;
-  msg('',false,'galleryMessage');
- }catch(e){msg(e.message,true,'galleryMessage');if(reset)root.innerHTML='<div class="m-empty">Could not load your gallery. Please try again.</div>';
-  if(more)more.hidden=false;
- }finally{galleryLoading=false;if(more){more.disabled=false;more.textContent='Load more photos ↓';}}
+  const data=await request('gallery/results?offset='+galleryNextOffset);
+  const items=data.images||[];galleryItems=reset?items:galleryItems.concat(items.filter(x=>!galleryItems.some(y=>y.id===x.id)));
+  galleryNextOffset=data.nextOffset??null;storeGallery();drawCustomerGallery();msg('',false,'galleryMessage');
+ }catch(e){msg(e.message,true,'galleryMessage');if(!galleryItems.length)root.innerHTML='<div class="m-empty">Could not load your gallery. Please try again.</div>';}
+ finally{galleryLoading=false;if(more){more.disabled=false;more.textContent='Load more photos ↓'}}
 }
 async function loadPayments(){
  const root=$('membershipPayments');if(!root)return;
@@ -183,18 +222,18 @@ async function uploadAll(){if(uploadBusy)return;
  if(!entitlement?.active){try{await refreshEntitlement()}catch(e){return msg(e.message,true)}}
  if(!entitlement?.active)return msg('Start your ₹499 monthly plan first.',true);
  if(!entitlement.freeAccess&&uploadFiles.length>entitlement.remaining)return msg(`You have ${entitlement.remaining} uploads remaining. Upload fewer photos or add more after using your current allowance.`,true);
- uploadBusy=true;$('sendUploads').disabled=true;let done=0;const total=uploadFiles.length;const progress=$('uploadProgress');progress.hidden=false;
+ uploadBusy=true;$('sendUploads').disabled=true;uploadOverlay(true);let done=0;const total=uploadFiles.length;const progress=$('uploadProgress');progress.hidden=false;
  try{
   const batch=crypto.randomUUID();let errors=[];
   for(const file of [...uploadFiles]){
    const f=new FormData();f.set('file',file);f.set('batch',batch);
-   $('uploadProgressText').textContent='Uploading '+file.name;$('uploadPercent').textContent=Math.round(done/total*100)+'%';$('uploadBar').style.width=Math.round(done/total*100)+'%';
+   uploadOverlay(true,'Uploading '+(done+1)+' of '+total+' photos…');$('uploadProgressText').textContent='Uploading '+file.name;$('uploadPercent').textContent=Math.round(done/total*100)+'%';$('uploadBar').style.width=Math.round(done/total*100)+'%';
    try{await request('upload',{method:'POST',body:f});done++;uploadFiles=uploadFiles.filter(x=>x!==file)}catch(e){errors.push(file.name+': '+e.message);break}
   }
   drawSelected();const state=await request('status');entitlement=state.entitlement;renderPlan();await loadUploads();
   $('uploadPercent').textContent=Math.round(done/total*100)+'%';$('uploadBar').style.width=Math.round(done/total*100)+'%';
   msg(errors.length?`${done} submitted. ${errors[0]}`:`${done} photo${done===1?'':'s'} submitted. Processing — expect results within 24 hours.`,!!errors.length);
- }catch(e){msg(e.message,true)}finally{uploadBusy=false;$('sendUploads').disabled=false;setTimeout(()=>{progress.hidden=true;$('uploadBar').style.width='0'},1200)}
+ }catch(e){msg(e.message,true)}finally{uploadBusy=false;uploadOverlay(false);$('sendUploads').disabled=false;setTimeout(()=>{progress.hidden=true;$('uploadBar').style.width='0'},1200)}
 }
 async function payment(kind){
  if(!await signedInOrPrompt(()=>payment(kind)))return;
@@ -295,3 +334,8 @@ if($('aiAttached'))showAiAttachments();
 if($('aiSend'))$('aiSend').onclick=aiSend;
 if($('aiPrompt'))$('aiPrompt').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();aiSend()}};
 boot();
+
+if(page==='ai'){
+ const fitStudio=()=>{const viewport=window.visualViewport;const height=Math.max(300,Math.round(viewport?.height||window.innerHeight));document.body.style.setProperty('--athave-visible-height',height+'px')};
+ fitStudio();window.addEventListener('resize',fitStudio,{passive:true});window.visualViewport?.addEventListener('resize',fitStudio,{passive:true});
+}
