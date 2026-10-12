@@ -1,48 +1,37 @@
-# Athave AI V7 — GitHub / Cloudflare Pages
+# Athave AI V8 — Selective, low-waste image generation
 
-This is the COMPLETE website package (not just a patch). Upload **contents of this folder** to GitHub repository root. Keep `public/`, `functions/`, `sql/`.
+This is a **full replacement website**, with the current Cloudflare Pages Functions backend, Supabase customer/payment/redeem integration, MSG91 OTP login, one-time top-ups, admin dashboard and the new two-step product workflow.
 
-## Cloudflare Pages
-- Framework: None
-- Build command: `exit 0`
-- Output directory: `public`
-- Root: repository root
+## Install (existing Athave AI project)
 
-## Existing environment variables
-Keep SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, MSG91_WIDGET_ID, MSG91_AUTH_KEY, MSG91_WIDGET_TOKEN, SESSION_SECRET, GEMINI_API_KEY, GEMINI_IMAGE_MODEL, ANALYSIS_MODEL, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET.
+1. **Before deploying code**, open the SAME Supabase StudioWhite project already used by Athave AI.
+2. Supabase → SQL Editor → New query → paste `sql/v8_analysis_cache_limits.sql` → Run. Only run the V8 patch on existing accounts. It creates an `analysis_requests` cache and rate limiter; it does not reset customer, wallet, payment, job or redeem data.
+3. Extract this ZIP; **upload its contents** into the root of your EXISTING GitHub `athave-ai` repository and replace the old files. Keep folder nesting intact: `public/index.html`, `public/create/index.html`, `public/app.js`, `functions/api/[[path]].js`.
+4. Commit to `main`; wait for Cloudflare Pages to deploy. Existing Cloudflare Pages settings remain: framework **None**, build command `exit 0`, output `public`, repository root blank.
+5. Keep all existing Production secrets in Cloudflare (Supabase URL, service role key, SESSION_SECRET, MSG91, Razorpay, Gemini, ADMIN_ACCESS_ID, GENERATION_ENABLED).
+6. Optionally add `MAX_ANALYSES_PER_DAY=12` as **Text** in Cloudflare production variables. Default is 12. You can change `ANALYSIS_MODEL` to `gemini-3.5-flash-lite` if your Gemini API project has access; do not change a model that is already working merely to follow the example. See https://ai.google.dev/gemini-api/docs/models for supported model IDs.
+7. Refresh your site; sign in with phone OTP at `/create/`. Upload one or two photos, press **Analyze my products**, tap the view cards you need and then press **Generate N selected images**. Open `/results/` for 1024 × 1024 optimized WebP downloads.
 
-## Separate admin
-- Open `/admin/` directly. Login needs **only admin ID**, not customer mobile OTP.
-- In Cloudflare Production Variables and Secrets, set `ADMIN_ACCESS_ID` to `Tefter` (Secret). Existing `SESSION_SECRET` signs a separate 8-hour admin cookie.
-- Normal customers use OTP from `/` and `/profile/`. Admin uses `/admin/` and its own independent cookie. Customer session cannot unlock `/admin/`.
-- Admin can read customers, verified top-ups, create and disable redeem codes.
-- Existing V4 SQL migration must already be installed for admin APIs. **No new SQL changes** for V7.
+## Exactly how the credit and API costs work
 
-### SECURITY WARNING (IMPORTANT)
-The publicly chosen admin ID `Tefter` is a **weak credential**. Anyone who guesses or knows the ID could access customer phone numbers and payment records. Before real production/customer use, use a strong unique private secret as ADMIN_ACCESS_ID and preferably protect `/admin/` with Cloudflare Access / passkeys / 2FA. An ID-only admin login is not suitable protection for financial or personal data. Do not put the ID into frontend code or GitHub. Cloudflare WAF rate limiting on `/api/admin/login` is recommended.
+- The **Analyze** action calls a vision/text model to detect up to 4 products but **never generates images or deducts customer image credits**. Google may bill a small amount for that analysis API call.
+- Same uploaded photos are recognized by hash and reused from the database cache without another analysis model request. New analysis attempts are limited to 12/day per user by default, with a 20-second minimum gap for new photos.
+- User sees small **clickable view cards**, not checkboxes. No output is selected automatically. The website shows the exact number of image credits needed.
+- Only selected view cards trigger image model calls. **One selected view = one request = one customer image credit**. For example a model wearing a polo and trousers can yield four card options; selecting only Polo Front runs exactly one image generation request.
+- An image credit is reserved at the start of each generation and refunded on backend failure; Google can still charge for unsuccessful Gemini requests. The app stops batch generation at the first failed output to limit runaway charges.
+- Outputs are private in Supabase Storage; images are converted to centered, white-background 1024×1024 WebP on download and compressed as far as quality permits. The model is *asked* to produce pure white but pixel-perfect fidelity for unseen backs and tiny logos cannot be guaranteed.
 
-## Homepage
-Uses the two supplied transparent-background images: white polo and white earbuds; no shoe, no combined eraser mask or forced image blending.
+## Supported detections and view cards
 
-## Studio
-A simple single-line image balance / Top up link, with modest spacing before Generate. Upload requires a product photo; a second reference is optional.
+Clothes (T-shirt, polo, shirt, trousers, shorts, jeans, skirt, hoodie, jacket, dress): **Front, Back**.
+Shoe: **Catalogue, Side, Back**. Watch: **Front, Angled**. Bag: **Front, Back, Side**. Cap: **Front, Back**. Other: **Catalogue, Angled**.
 
-## Production checks
-- Test mobile OTP login -> account/profile -> generation.
-- Test `/admin/` ID login in a private browser with NO customer session; only the admin cookie should unlock its endpoints.
-- Verify failing login cannot read `/api/admin/users`. Verify customer OTP cannot read admin endpoints.
-- Verify redeem codes and Razorpay orders in Test Mode before enabling real payments.
-- Gemini image generation uses backend API and must be configured separately. Keep GENERATION_ENABLED=false until tested.
+## Profiles, payments and admin
 
+- The separate customer profile no longer contains the founder's personal-site link. Information about the founder remains in About.
+- Existing ₹499, ₹999, custom Razorpay top-ups and customer redeem-credit system are retained.
+- Separate `/admin/` still uses the existing `ADMIN_ACCESS_ID` unlock mechanism. An ID-only admin credential is **not secure enough for public launch**; protect admin with Cloudflare Access or another real second factor before storing customers' sensitive information or accepting live payments.
 
-## V7 admin redeem form hotfix
-Fixed red error `Cannot read properties of null (reading 'reset')` after creating a redeem code. Only `public/admin.js` changed. The successful redeem code may already be saved in Supabase; refresh the admin page and inspect the list before creating another. No SQL, Cloudflare secret, or other deployment change is needed.
+## Optional improvement for lower provider costs
 
-
-## V7 Gemini image-format API fix (October 2026)
-
-The image-generation request previously sent `generationConfig.responseFormat.image.aspectRatio='1:1'`, which Google parsed as an enum and rejected with `Invalid value at generation_config.response_format.image.aspect_ratio`. The backend now uses `generationConfig.imageConfig` with string `aspectRatio: '1:1'` and `imageSize: '1K'`, as documented by the Google Gemini Generate Content API. This changes **only** `functions/api/[[path]].js`.
-
-Upload the modified file to GitHub at the **exact same path** (the double brackets are part of the filename), commit to `main`, wait for Cloudflare Pages deployment success, and try one test image. Cloudflare secrets/SQL do not need updating. Images may incur Gemini charges. The generated original is returned by Gemini, with 1024x1024 WebP optimization in the customer browser on download.
-
-Documentation: https://ai.google.dev/api/generate-content
+Image processing (simple background cutout plus canvas) may cost less than generative AI for clean product photos, but that requires a separate segmentation service or model runtime. This package intentionally does **not** silently send images to a third-party service or claim it performs a cheaper operation without that provider being configured. The real savings here come from lower-cost vision detection and generating *only selected outputs*.

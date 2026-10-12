@@ -4,6 +4,9 @@ const page = document.body.dataset.page;
 let config = null, me = null, lastAuthError = null, verifying = false, generating = false;
 let currentPhone = '', activePayment = null;
 let selected = { front: null, back: null };
+let analysisPlan=null, analyzedImages=null;
+const chosenOutputs=new Set();
+const MAX_SELECTABLE_OUTPUTS=8;
 const pendingTimer = { start: 0 };
 const homeUrl = location.pathname + location.search;
 function show(node, state) { if (node) node.hidden = !state; }
@@ -146,13 +149,13 @@ function renderPhotoSlot(side) {
  if(!file)return;
  const pic=document.createElement('img'), u=URL.createObjectURL(file);pic.src=u;pic.onload=()=>URL.revokeObjectURL(u);
  const text=document.createElement('div'),n=document.createElement('b'),sz=document.createElement('small');n.textContent=file.name;sz.textContent=formatBytes(file.size);text.append(n,sz);
- const remove=document.createElement('button');remove.type='button';remove.textContent='×';remove.setAttribute('aria-label','Remove photo');remove.onclick=()=>{selected[side]=null;$(side+'File').value='';renderPhotoSlot(side)};
+ const remove=document.createElement('button');remove.type='button';remove.textContent='×';remove.setAttribute('aria-label','Remove photo');remove.onclick=()=>{selected[side]=null;$(side+'File').value='';renderPhotoSlot(side);invalidateAnalysis()};
  root.append(pic,text,remove);
 }
 function assignPhoto(side,file){
  if(!file)return;
  if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>7*1024*1024){pageStatus('Please select JPG, PNG or WebP under 7 MB.',true);return}
- selected[side]=file;renderPhotoSlot(side);pageStatus('');
+ selected[side]=file;renderPhotoSlot(side);invalidateAnalysis();pageStatus('');
 }
 for(const side of ['front','back']) {
  const input=$(side+'File'),drop=$(side+'Drop');if(!input)continue;
@@ -162,38 +165,100 @@ for(const side of ['front','back']) {
  drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('is-dragging');assignPhoto(side,e.dataTransfer.files?.[0])});
 }
 async function encodePhoto(file){
- let bmp=await createImageBitmap(file),scale=Math.min(1,1080/Math.max(bmp.width,bmp.height));
+ let bmp=await createImageBitmap(file),scale=Math.min(1,960/Math.max(bmp.width,bmp.height));
  let c=document.createElement('canvas');c.width=Math.round(bmp.width*scale);c.height=Math.round(bmp.height*scale);
  let ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);ctx.drawImage(bmp,0,0,c.width,c.height);bmp.close();
- let data=c.toDataURL('image/jpeg',.76).split(',')[1];if(data.length>1600000)throw Error('This photo is too large after optimization. Use a smaller one.');
+ let data=c.toDataURL('image/jpeg',.69).split(',')[1];if(data.length>1600000)throw Error('This photo is too large after optimization. Use a smaller one.');
  return {mime:'image/jpeg',data};
 }
 function storeResults(list){sessionStorage.setItem('athave_recent_results', JSON.stringify(list));}
 function storedResults(){try{return JSON.parse(sessionStorage.getItem('athave_recent_results')||'[]')}catch{return []}}
-async function generate(){
- if(generating)return;
- if(!selected.front)return pageStatus('Please upload the front image first.',true);
- if(!await ensureLogin(generate))return;
- generating=true;let button=$('generateBtn');button.disabled=true;
- let made=[];
- try{
-  pageStatus('Preparing reference photos…');const images=await Promise.all([selected.front,selected.back].filter(Boolean).map(encodePhoto));
-  pageStatus('Analysing the products in your photo…');const analysis=await post('analyze',{images});const outputs=analysis.outputs||[];
-  if(!outputs.length)throw Error('No product detected in your reference photo.');
-  if((me.wallet?.balance ?? 0)<outputs.length)throw Error(`You need ${outputs.length} image credits. Your account has ${me.wallet.balance}. Add a top-up from Pricing.`);
-  for(let i=0;i<outputs.length;i++){
-   const target=outputs[i],label=`${target.kind} — ${target.side}${target.inferred?' (AI-inferred)':''}`;
-   pageStatus(`Generating ${i+1} of ${outputs.length}: ${label}. Keep this tab open…`);
-   try {
-    const job=await post('generate',{images,kind:target.kind,side:target.side});
-    made.push({id:job.id,label,kind:target.kind,side:target.side});storeResults(made);
-    // The original output remains in private Supabase Storage. WebP conversion is done client-side on download.
-   }catch(e){pageStatus(`Could not generate ${label}: ${e.message}`,true);if(!made.length)throw e;break}
-  }
-  if(made.length){storeResults(made);location.href='/results/'}
- }catch(e){pageStatus(e.message,true)}finally{generating=false;button.disabled=false;await refresh({quiet:true})}
+function invalidateAnalysis(){
+ analysisPlan=null;analyzedImages=null;chosenOutputs.clear();
+ show($('selectionPanel'),false);
+ if($('analyzeBtn')){$('analyzeBtn').disabled=false;$('analyzeBtn').textContent='Analyze my products →';show($('analyzeBtn'),true)}
+ updateSelection();
 }
-if($('generateBtn')) $('generateBtn').onclick=generate;
+function updateSelection(){
+ const total=chosenOutputs.size;
+ if($('selectedCount'))$('selectedCount').textContent=String(total);
+ if($('creditCount'))$('creditCount').textContent=String(total);
+ if($('generateBtn'))$('generateBtn').disabled=!analysisPlan||!total||generating;
+ if($('generateLabel'))$('generateLabel').textContent=total?`Generate ${total} selected image${total===1?'':'s'}`:'Select image views to continue';
+}
+function renderSelectionCards(){
+ const root=$('detectedItems');if(!root)return;root.replaceChildren();
+ for(const item of analysisPlan?.items||[]){
+  const wrapper=document.createElement('div');wrapper.className='detected-item';
+  const heading=document.createElement('div');heading.className='detected-heading';
+  const title=document.createElement('strong');title.textContent=item.name||item.kind;
+  const subtitle=document.createElement('span');subtitle.textContent=item.appearance||'Detected from your photo';
+  heading.append(title,subtitle);wrapper.append(heading);
+  const row=document.createElement('div');row.className='view-choices';
+  for(const view of item.views){
+   const key=item.id+'|'+view;
+   const btn=document.createElement('button');btn.type='button';btn.className='view-card';btn.setAttribute('aria-pressed','false');btn.dataset.key=key;
+   const glyph=document.createElement('span');glyph.className='view-card-icon';glyph.textContent=view==='front'?'↟':view==='back'?'↡':view==='side'?'⇥':view==='angle'?'◩':'✦';
+   const words=document.createElement('span');words.className='view-card-label';words.textContent=analysisPlan.views?.[view]||view;
+   const unit=document.createElement('small');unit.textContent='1 credit';
+   btn.append(glyph,words,unit);
+   btn.onclick=()=>{
+    if(chosenOutputs.has(key))chosenOutputs.delete(key);
+    else if(chosenOutputs.size>=MAX_SELECTABLE_OUTPUTS){pageStatus(`Select up to ${MAX_SELECTABLE_OUTPUTS} images in one batch.`,true);return}
+    else chosenOutputs.add(key);
+    for(const card of root.querySelectorAll('.view-card')){const active=chosenOutputs.has(card.dataset.key);card.classList.toggle('is-selected',active);card.setAttribute('aria-pressed',String(active))}
+    updateSelection();pageStatus('');
+   };
+   row.append(btn);
+  }
+  wrapper.append(row);root.append(wrapper);
+ }
+ updateSelection();
+}
+async function analyzePhotos(){
+ if(!selected.front)return pageStatus('Upload your product image first.',true);
+ if(!await ensureLogin(analyzePhotos))return;
+ const btn=$('analyzeBtn');if(!btn)return;
+ btn.disabled=true;
+ try{
+  pageStatus('Preparing your photos…');
+  const images=await Promise.all([selected.front,selected.back].filter(Boolean).map(encodePhoto));
+  pageStatus('Detecting your products. No image credits are used for this step…');
+  const result=await post('analyze',{images});
+  if(!result.items?.length||!result.analysisToken)throw Error('Product detection returned no usable items.');
+  analyzedImages=images;analysisPlan=result;chosenOutputs.clear();
+  renderSelectionCards();show($('selectionPanel'),true);show(btn,false);
+  pageStatus(`${result.items.length} product${result.items.length===1?'':'s'} detected. Tap only the view cards you want.`);
+  $('selectionPanel')?.scrollIntoView({behavior:'smooth',block:'start'});
+ }catch(e){pageStatus(e.message,true)}finally{btn.disabled=false}
+}
+async function generate(){
+ if(generating||!analysisPlan||!analyzedImages)return;
+ const targets=[...chosenOutputs].map(key=>{const [itemId,view]=key.split('|');const item=analysisPlan.items.find(x=>x.id===itemId);return item?{itemId,view,item}:null}).filter(Boolean);
+ if(!targets.length)return pageStatus('Tap one or more view cards to select what you want.',true);
+ if(!await ensureLogin(generate))return;
+ await refresh({quiet:true});
+ if((me?.wallet?.balance??0)<targets.length)return pageStatus(`You selected ${targets.length} images but only have ${me?.wallet?.balance??0} credits. Top up first.`,true);
+ generating=true;const button=$('generateBtn');updateSelection();let made=[],errors=[];
+ try{
+  for(let i=0;i<targets.length;i++){
+   const target=targets[i],label=`${target.item.name} — ${analysisPlan.views[target.view]}`;
+   pageStatus(`Generating ${i+1} of ${targets.length}: ${label}. Only selected views are sent to the image model…`);
+   try{
+    const job=await post('generate',{images:analyzedImages,analysisToken:analysisPlan.analysisToken,itemId:target.itemId,view:target.view});
+    made.push({id:job.id,label:job.label||label,kind:job.kind,side:job.side});storeResults(made);
+   }catch(e){errors.push(`${label}: ${e.message}`);
+    // Stop after the first failed output rather than spending more API money on repeated likely configuration errors.
+    break;
+   }
+  }
+  if(made.length){storeResults(made);if(errors.length)sessionStorage.setItem('athave_generation_warning',errors.join(' · '));location.href='/results/'}
+  else if(errors.length)pageStatus(errors[0],true);
+ }catch(e){pageStatus(e.message,true)}finally{generating=false;updateSelection();await refresh({quiet:true})}
+}
+if($('analyzeBtn'))$('analyzeBtn').onclick=analyzePhotos;
+if($('changePhotosBtn'))$('changePhotosBtn').onclick=()=>invalidateAnalysis();
+if($('generateBtn'))$('generateBtn').onclick=generate;
 // Images downloaded via authenticated private endpoint and browser WebP conversion.
 async function optimizedWebp(id){
  const response=await fetch('/api/images/'+id,{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw Error('Could not load generated image');
@@ -226,6 +291,7 @@ async function populateResults(){
  let list=storedResults();if(!list.length){let user=await refresh({quiet:true});if(user){list=(user.history||[]).filter(x=>x.status==='completed').slice(0,8).map(x=>({id:x.id,label:x.kind+' — '+x.side}))}}
  const root=$('resultsGrid');root.replaceChildren();if(!list.length){root.innerHTML='<div class="empty-card">No generated images yet. <a href="/create/" style="text-decoration:underline">Create your first product photo</a>.</div>';return}
  for(const item of list)root.append(buildOutputCard(item));
+ const warning=sessionStorage.getItem('athave_generation_warning');if(warning){sessionStorage.removeItem('athave_generation_warning');pageStatus('Some views could not be generated: '+warning,true)}
 }
 // ZIP encoder (store-only, no dependency). WebP is already compressed.
 function crc32(bytes){let v=0xffffffff;for(let b of bytes){v^=b;for(let i=0;i<8;i++)v=(v>>>1)^((v&1)?0xedb88320:0)}return (v^0xffffffff)>>>0}

@@ -101,3 +101,31 @@
 .admin-login-help{font-size:12px;color:#9a5b28;line-height:1.5;margin-top:14px}
 .admin-unlock-panel{max-width:510px;margin:30px auto 70px}
 @media(max-width:730px){.product-stage .hero-shirt{left:-4%;top:0;width:73%;height:91%}.product-stage .hero-earbud{left:37%;top:29%;width:67%;height:69%}.generator-bottom{margin-top:21px!important;gap:19px!important}.generator-bottom .wallet-mini{font-size:13px;column-gap:7px}.generator-bottom .wallet-mini a{margin-left:8px!important}.admin-console-label{font-size:11px}.brand img{width:166px;height:57px}}
+
+/* V8 — clear, compact product-view cards; each is a button, not a checkbox. */
+.selection-panel{margin:35px auto 24px;scroll-margin-top:105px;max-width:760px;border-top:1px solid #e9ebef;padding-top:28px}
+.selection-eyebrow{font-size:11px;color:#808897;font-weight:800;letter-spacing:.15em;margin-bottom:11px}
+.selection-panel h2{font-size:clamp(24px,3.8vw,36px);letter-spacing:-.055em;margin-bottom:9px}
+.selection-panel>.lead{font-size:14px;line-height:1.65;margin:0 0 22px;color:#747c8a}
+.detected-items{display:grid;gap:13px}
+.detected-item{border:1px solid #e7e9ee;border-radius:17px;background:#fff;padding:19px 20px}
+.detected-heading{display:flex;gap:4px;flex-direction:column;margin-bottom:15px}
+.detected-heading strong{font-size:16px;color:#1c2029;letter-spacing:-.02em}
+.detected-heading span{font-size:12px;color:#868c99}
+.view-choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(116px,1fr));gap:9px}
+.view-card{cursor:pointer;font:inherit;display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-height:94px;padding:12px 13px;border:1px solid #e6e8ec;border-radius:12px;background:#fbfbfc;text-align:left;transition:border-color .17s,background .17s,transform .17s,box-shadow .17s}
+.view-card:hover{background:#f5f7f9;border-color:#bec3cc;transform:translateY(-1px)}
+.view-card:focus-visible{outline:3px solid #899ba9;outline-offset:2px}
+.view-card.is-selected{background:#14171b;color:#fff;border-color:#14171b;box-shadow:0 4px 12px rgba(5,9,15,.1)}
+.view-card-icon{width:23px;height:23px;font-size:19px;line-height:23px}
+.view-card-label{font-size:13px;font-weight:750}
+.view-card small{font-size:11px;color:#8a909c}
+.view-card.is-selected small{color:#c6cdd6}
+.selection-total{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:23px 0 17px}
+.selection-total>div{display:flex;flex-direction:column;gap:3px}
+.selection-total strong{font-size:15px}
+.selection-total small{color:#79818e;font-size:12px}
+.text-reanalyze{border:0;background:transparent;color:#515967;text-decoration:underline;text-underline-offset:3px;cursor:pointer;white-space:nowrap;font:inherit;font-size:12px}
+.selection-panel>.btn:disabled{opacity:.5;cursor:not-allowed}
+.generator-bottom{margin-top:25px!important;gap:18px!important}
+@media(max-width:640px){.selection-panel{margin-top:28px;padding-top:25px}.detected-item{padding:15px}.view-choices{grid-template-columns:repeat(2,minmax(0,1fr))}.selection-total{flex-wrap:wrap;gap:10px}.selection-panel>.lead{font-size:13px}}

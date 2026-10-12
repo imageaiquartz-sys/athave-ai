@@ -1,7 +1,14 @@
 /* Athave AI Cloudflare Pages Function. All secrets live in Pages > Settings > Variables & Secrets. */
 const COOKIE='athave_session', PENDING='athave_pending', OTP_COOKIE='athave_otp_request', ADMIN_COOKIE='athave_admin_session', BUCKET='athave-results';
-const ALLOWED_KINDS=new Set(['shirt','polo shirt','t-shirt','hoodie','jacket','dress','pants','jeans','shorts','skirt','cap','shoe','bag','product']);
+const ALLOWED_KINDS=new Set(['shirt','polo shirt','t-shirt','hoodie','jacket','dress','pants','jeans','shorts','skirt','cap','shoe','bag','watch','sunglasses','jewellery','product']);
 const GARMENTS=new Set(['shirt','polo shirt','t-shirt','hoodie','jacket','dress','pants','jeans','shorts','skirt','cap']);
+const VIEW_LABELS={front:'Front view',back:'Back view',catalogue:'Catalogue view',side:'Side view',angle:'Angled view'};
+const MAX_DETECTED_PRODUCTS=4;
+function viewsForKind(kind){if(GARMENTS.has(kind))return ['front','back'];if(kind==='shoe')return ['catalogue','side','back'];if(kind==='watch'||kind==='jewellery'||kind==='sunglasses')return ['front','angle'];if(kind==='bag')return ['front','back','side'];return ['catalogue','angle']}
+function safeDescriptor(v){return String(v||'').replace(/[<>\\\n\r{}]/g,' ').replace(/\s+/g,' ').trim().slice(0,95)}
+async function fingerprintImages(images){return sha(images.map(x=>x.inlineData.data).join('|'))}
+async function signAnalysisPlan(env,customer,hash,items){const payload=b64url(enc.encode(JSON.stringify({user:customer,hash,items,exp:Date.now()+15*60*1000})));return payload+'.'+await hmac(env.SESSION_SECRET+':analysis',payload)}
+async function readAnalysisPlan(env,token,user,hash){if(!env.SESSION_SECRET||typeof token!=='string'||token.length>5500)return null;const [payload,mac,...extra]=token.split('.');if(!payload||!mac||extra.length||await hmac(env.SESSION_SECRET+':analysis',payload)!==mac)return null;try{const v=JSON.parse(new TextDecoder().decode(unb64url(payload)));return v.user===user&&v.hash===hash&&v.exp>Date.now()&&Array.isArray(v.items)?v:null}catch{return null}}
 const enc=new TextEncoder();
 function json(body,status=200,extra={}){return new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json;charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff',...extra}})}
 function err(message,status=400){return json({error:message},status)}
@@ -245,37 +252,59 @@ export async function onRequest({request,env,params}){
    return json({user:{phone:user.phone,name:user.name,isAdmin:user.is_admin},wallet,history:await getHistory(env,user.id),payments});
   }
   if(method==='POST'&&route==='analyze'){
-   let body=await request.json(),images=validateInputImages(body.images);
-   const manualKind=String(body.manualKind||'auto').toLowerCase();
-   if(manualKind!=='auto'&&!ALLOWED_KINDS.has(manualKind))return err('Invalid product type');
+   const body=await request.json(),images=validateInputImages(body.images);
    const walletBefore=(await tbl(env,'GET','wallets',`?customer_id=eq.${user.id}&select=balance`))?.[0]?.balance||0;
-   if(walletBefore<1)return err('Not enough image limit; top up before analysing a product');
-   if(manualKind!=='auto'){
-     return json({outputs:(GARMENTS.has(manualKind)?['front','back']:['catalogue']).map(side=>({kind:manualKind,side,inferred:side==='back'&&images.length<2}))});
+   if(walletBefore<1)return err('Add image credits to analyze and generate products. No image credits are deducted by analysis.',402);
+   const hash=await fingerprintImages(images);
+   // Supabase performs per-customer throttling and returns cached detection results when identical photos are uploaded.
+   const claim=await rpc(env,'start_analysis_request',{p_customer:user.id,p_fingerprint:hash,p_daily_max:Number(env.MAX_ANALYSES_PER_DAY||12)});
+   let items;
+   if(claim?.cached&&Array.isArray(claim.items)&&claim.items.length){
+    items=claim.items;
+   }else{
+    const prompt=`You are a budget-conscious product catalogue detector, NOT an image generator. Inspect supplied photo(s) carefully. List each distinct SELLABLE product in the photos, up to 4, ignoring people, bodies and backgrounds. Eg a model wearing a polo and jeans = two items. Two views of one polo = one item. Detect watches, shoes, bags, shirts, skirts, trousers, caps, jewelry, accessories. Return JSON only, in this format: {"items":[{"kind":"polo shirt","name":"Blue collar polo shirt","appearance":"white fabric, blue collar, small dark embroidered logo","location":"upper torso"}]}. Kind MUST be one of: shirt, polo shirt, t-shirt, hoodie, jacket, dress, pants, jeans, shorts, skirt, cap, shoe, bag, watch, sunglasses, jewellery, product. name <=45 characters, appearance <=95 characters, location <=40 characters. Describe only clearly visible details. Don't hallucinate or invent additional products. If it's one unrecognized product use kind product. Never generate an image.`;
+    let result;
+    try{
+     const parts=await gemini(env,[{text:prompt},...images],env.ANALYSIS_MODEL||'gemini-3.5-flash-lite',{responseMimeType:'application/json',temperature:0,maxOutputTokens:500});
+     result=JSON.parse((parts.find(x=>x.text)?.text||'{}').replace(/^```(?:json)?\s*|\s*```$/g,''));
+    }catch(e){throw Error('Product analysis failed: '+String(e.message).slice(0,150))}
+    let list=Array.isArray(result.items)?result.items:[];
+    items=list.slice(0,MAX_DETECTED_PRODUCTS).map((x,i)=>({
+      id:'item'+(i+1),kind:ALLOWED_KINDS.has(String(x.kind||'').toLowerCase())?String(x.kind).toLowerCase():'product',
+      name:safeDescriptor(x.name)||'Product '+(i+1),appearance:safeDescriptor(x.appearance),location:safeDescriptor(x.location)
+    }));
+    if(!items.length)items=[{id:'item1',kind:'product',name:'Detected product',appearance:'',location:''}];
+    if(claim?.requestId)await rpc(env,'finish_analysis_request',{p_request:claim.requestId,p_items:items});
    }
-   const prompt=`Analyze these product reference photos for a catalogue photo service. Return compact JSON only: {"items":[{"kind":"shirt|polo shirt|t-shirt|hoodie|jacket|dress|pants|jeans|shorts|skirt|cap|shoe|bag|product","isGarment":true|false}]}. Identify DISTINCT product types. If a person wears both shirt and pants return both (up to two). Treat multiple reference views of the same object as one item. Clothing and caps are garments that need separate front and back images. Shoes/bags/other objects need one professional catalogue image. Do not include people as items. Never invent products that are absent. Max 2 items.`;
-   let result;try{let parts=await gemini(env,[{text:prompt},...images],env.ANALYSIS_MODEL||'gemini-3.5-flash-lite',{responseMimeType:'application/json'});result=JSON.parse(parts.find(x=>x.text)?.text||'{}')}catch(e){throw Error('Product detection failed: '+String(e.message).slice(0,115)+'. Check ANALYSIS_MODEL and try again.')}
-   let items=(Array.isArray(result.items)?result.items:[]).slice(0,2).filter(x=>ALLOWED_KINDS.has(x.kind));if(!items.length)items=[{kind:'product'}];
-   let outputs=[];for(let item of items){let garment=GARMENTS.has(item.kind);for(let side of (garment?['front','back']:['catalogue']))outputs.push({kind:item.kind,side,inferred:side==='back'&&images.length<2})}
-   return json({outputs:outputs.slice(0,4)});
+   // Never run an image model during this endpoint. A signed, short-lived plan restricts generation to detected products.
+   items=items.map((x,i)=>({id:'item'+(i+1),kind:x.kind,name:x.name,appearance:x.appearance,location:x.location,views:viewsForKind(x.kind)}));
+   return json({items,views:VIEW_LABELS,analysisToken:await signAnalysisPlan(env,user.id,hash,items),maxOutputs:8,analysisCost:0});
   }
   if(method==='POST'&&route==='generate'){
    if(env.GENERATION_ENABLED!=='true')return err('Image generation temporarily paused until the owner enables it',503);
-   let body=await request.json(),images=validateInputImages(body.images);
-   const kind=String(body.kind||'product').toLowerCase(),side=String(body.side||'catalogue');
-   if(!ALLOWED_KINDS.has(kind)||!['front','back','catalogue'].includes(side)||(!GARMENTS.has(kind)&&side!=='catalogue'))return err('Invalid image request');
-   const job=await rpc(env,'reserve_generation',{p_customer:user.id,p_kind:kind,p_side:side,p_monthly_max:Number(env.AI_MONTHLY_CALL_CAP||80),p_daily_max:Number(env.MAX_GENERATIONS_PER_DAY||30)});
+   const body=await request.json(),images=validateInputImages(body.images);
+   const hash=await fingerprintImages(images);
+   const plan=await readAnalysisPlan(env,body.analysisToken,user.id,hash);
+   if(!plan)return err('Your product analysis has expired or the photos changed. Analyze again before generating.',403);
+   const item=plan.items.find(x=>x.id===body.itemId);
+   const view=String(body.view||'');
+   if(!item||!item.views.includes(view)||!VIEW_LABELS[view])return err('This output was not offered in your analysis. Choose a product view card first.',400);
+   const kind=item.kind;
+   // One credit reserved for exactly this one selected view. Failures refund the wallet credit.
+   const job=await rpc(env,'reserve_generation',{p_customer:user.id,p_kind:kind,p_side:view,p_monthly_max:Number(env.AI_MONTHLY_CALL_CAP||80),p_daily_max:Number(env.MAX_GENERATIONS_PER_DAY||30)});
    try{
-    const prompt=`Use the supplied photo(s) as strict reference of ONE actual commercial product. ${images.length===2?'The first supplied photo is the FRONT and the second is the BACK of the same original product when both show the same item. Use the correct reference for each requested angle.':'Only the first/front reference is available. Do not claim the unseen back is original.'} Extract/isolate only the ${kind}. ${side==='catalogue'?'Show an ideal premium professional ecommerce product camera angle.':`Show its ${side.toUpperCase()} view as a standalone garment with natural realistic shape; remove the model/person entirely. If this angle is not visible, carefully infer a plausible ${side} based on supplied references; do NOT claim unseen details are exact.`} Pure #FFFFFF background edge-to-edge, centered with 8–12% margin, no person/human, no hanger, no props, no extra product, no added graphics, no captions or watermarks. Maintain exact product color, material, patches, pattern, seams, text and logo wherever visible; don't invent logos, words, badges or alter known design. Photorealistic high-end studio lighting, clean premium catalogue cutout. SINGLE product only, 1:1 square 1024x1024.`;
-    let parts=await gemini(env,[{text:prompt},...images],env.GEMINI_IMAGE_MODEL||'gemini-3.1-flash-lite-image',{responseModalities:['TEXT','IMAGE'],imageConfig:{aspectRatio:'1:1',imageSize:'1K'}});
+    const viewDirection={front:'straight-on FRONT',back:'straight-on BACK',catalogue:'premium three-quarter catalogue',side:'clean SIDE PROFILE',angle:'three-quarter ANGLED'}[view];
+    const referenceHint=images.length===2?'Use both uploaded photos as references and prefer whichever actually shows the requested view. The second photo is not necessarily a back view.':'Only one reference photo exists. An unseen view must be estimated realistically.';
+    const prompt=`Produce exactly ONE square high-quality ecommerce catalogue image of the ${kind} called "${item.name}". The target is the ${viewDirection} view. Location in source image: "${item.location}". Distinguishing observable details: "${item.appearance}". Use the uploaded photo(s) as the ONLY visual references. ${referenceHint} If the photo contains a person wearing multiple items (for example a shirt AND trousers), extract ONLY the chosen ${kind}; remove all other items, the person, arms, legs and model entirely. Standalone product, beautifully symmetrical and centered, garment on invisible mannequin if needed with realistic drape; no hanger. For watches show just the watch; for footwear show just the footwear product; for bags show the bag alone. Closely match real patterns, seams, brand marks, embroidery and color in visible reference, do not swap branding. If backside is unseen it is a plausible reconstruction, do not fabricate conspicuous prints. PURE SOLID #FFFFFF background, white all four corners, professional uniform lighting, subtle natural contact shadow only, no props, no people, no captions, no added watermarks. Output just ONE product image at 1:1 square, 1024x1024, suitable for WebP catalogues.`;
+    const parts=await gemini(env,[{text:prompt},...images],env.GEMINI_IMAGE_MODEL||'gemini-3.1-flash-lite-image',{responseModalities:['TEXT','IMAGE'],imageConfig:{aspectRatio:'1:1',imageSize:'1K'}});
     const part=parts.find(p=>p.inlineData?.data&&p.inlineData?.mimeType?.startsWith('image/'));
     if(!part)throw Error('AI returned no picture. Check Gemini image model access.');
     const binary=Uint8Array.from(atob(part.inlineData.data),c=>c.charCodeAt(0));if(binary.length>8500000)throw Error('AI output too large');
     const type=part.inlineData.mimeType;const ext=type.includes('jpeg')?'jpg':type.includes('webp')?'webp':'png';const key=`${user.id}/${job}.${ext}`;
-    let r=await supa(env,'POST',`/storage/v1/object/${BUCKET}/${key}`,binary,{raw:true,headers:{'content-type':type,'x-upsert':'false'},response:true});
+    const r=await supa(env,'POST',`/storage/v1/object/${BUCKET}/${key}`,binary,{raw:true,headers:{'content-type':type,'x-upsert':'false'},response:true});
     if(!r.ok)throw Error('Could not save generated image to storage');
     await rpc(env,'finish_generation',{p_job:job,p_storage_path:key});
-    return json({id:job,kind,side});
+    return json({id:job,kind,side:view,label:item.name+' — '+VIEW_LABELS[view]});
    }catch(e){try{await rpc(env,'fail_generation',{p_job:job,p_reason:String(e.message).slice(0,180)})}catch{}throw e}
   }
   if(method==='GET'&&route.startsWith('images/')){
