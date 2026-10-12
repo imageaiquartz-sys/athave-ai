@@ -315,17 +315,47 @@ function renderHistory(){let root=$('historyList');if(!root || !me)return;root.r
  for(const j of list){let row=document.createElement('div');row.className='history-row';if(j.status==='completed'){let img=document.createElement('img');img.src='/api/images/'+j.id;img.alt=j.kind+' '+j.side;img.loading='lazy';row.append(img)}let div=document.createElement('div');div.className='row-text';let name=document.createElement('strong'),date=document.createElement('small');name.textContent=j.kind+' — '+j.side;date.textContent=j.status+' · '+new Date(j.created_at).toLocaleString('en-IN');div.append(name,date);row.append(div);if(j.status==='completed'){let btn=document.createElement('button');btn.className='small-download';btn.textContent='Download ↓';btn.onclick=()=>downloadSingle({id:j.id,label:j.kind+' '+j.side});row.append(btn)}root.append(row)}
 }
 function renderPayments(){let root=$('paymentList');if(!root||!me)return;root.replaceChildren();let list=me.payments||[];if(!list.length){root.innerHTML='<div class="empty-card">No payments yet. <a href="/#pricing" style="text-decoration:underline">See pricing</a>.</div>';return}for(const p of list){let row=document.createElement('div');row.className='payment-row';const div=document.createElement('div');div.className='row-text';const a=document.createElement('strong'),b=document.createElement('small');a.textContent='₹'+(p.amount_paise/100).toFixed(0)+' · '+p.plan;b.textContent=p.status+' · '+new Date(p.created_at).toLocaleString('en-IN');div.append(a,b);row.append(div);root.append(row)}}
-// Razorpay: backend creates order and verifies both signature and captured payment.
+// Razorpay Checkout: new server-side order for each charge; only captured payment adds credits.
+let paymentInProgress=false;
+async function awaitPaymentCapture(orderId){
+ for(let i=0;i<7;i++){
+  const checked=await api('payments/status?orderId='+encodeURIComponent(orderId));
+  if(checked.paid){await refresh({required:true});return true;}
+  if(i<6)await new Promise(resolve=>setTimeout(resolve,2200));
+ }
+ return false;
+}
 async function pay(plan, amount){
+ if(paymentInProgress){pageStatus('A payment is already in progress. Please wait.',true);return;}
  if(!await ensureLogin(()=>pay(plan,amount)))return;
- if(!config?.payments)return pageStatus('Razorpay is not configured in Cloudflare.',true);
- try{pageStatus('Creating secure Razorpay payment order…');const order=await post('payments/order',{plan,amount});
- if(!window.Razorpay)throw Error('Razorpay checkout failed to load');
- const checkout=new window.Razorpay({key:order.keyId,amount:order.amount,currency:'INR',order_id:order.orderId,name:'Athave AI',description:'Image credits',prefill:{contact:me.user.phone.slice(2)},theme:{color:'#111418'},handler:async data=>{
-  try{pageStatus('Verifying captured payment…');await post('payments/verify',data);await refresh({required:true});pageStatus('Payment verified. Your image limit has been added.');toast('Top-up successful!')}catch(e){pageStatus('Payment needs verification: '+e.message,true)}
- }});
- checkout.on('payment.failed',()=>pageStatus('Payment was not completed.',true));checkout.open();
- }catch(e){pageStatus(e.message,true)}
+ if(!config?.payments)return pageStatus('Payments are not enabled yet. Please try again later.',true);
+ paymentInProgress=true;
+ try{
+  if(!window.Razorpay)throw Error('Razorpay checkout failed to load. Please reconnect and try again.');
+  pageStatus('Creating secure Razorpay payment order…');
+  const order=await post('payments/order',{plan,amount});
+  const checkout=new window.Razorpay({
+   key:order.keyId,amount:order.amount,currency:'INR',order_id:order.orderId,
+   name:'Athave AI',description:'One-time image credits',
+   prefill:{contact:me?.user?.phone?.slice(2)||''},theme:{color:'#111418'},
+   handler:async data=>{
+    try{
+     pageStatus('Verifying your captured payment…');
+     try{await post('payments/verify',data)}catch(e){
+      // Authorized payments can take time to capture; never mark paid prematurely.
+      if(!/captur|temporar|gateway|Database operation failed/i.test(e.message))throw e;
+     }
+     const paid=await awaitPaymentCapture(order.orderId);
+     if(paid){pageStatus('Payment confirmed. Image credits added!');toast('Top-up successful!')}
+     else pageStatus('Payment received by Razorpay but capture is pending. Do not pay again. Your credits will be added automatically once captured.',true);
+    }catch(e){pageStatus('Could not confirm payment: '+e.message+'. Check Payment History before paying again.',true)}
+    finally{paymentInProgress=false}
+   },
+   modal:{ondismiss:()=>{paymentInProgress=false;pageStatus('Payment window closed. No credits were added unless a payment was captured.')}}
+  });
+  checkout.on('payment.failed',()=>{paymentInProgress=false;pageStatus('Payment was not completed. Try again only after checking Payment History.',true)});
+  checkout.open();
+ }catch(e){paymentInProgress=false;pageStatus(e.message,true)}
 }
 for(const btn of document.querySelectorAll('.pay-btn'))btn.onclick=()=>{
  const plan=btn.dataset.plan;let amount=null;

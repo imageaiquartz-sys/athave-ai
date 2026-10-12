@@ -157,7 +157,7 @@ export async function onRequest({request,env,params}){
     const origin=request.headers.get('Origin');const expected=new URL(request.url).origin;
     if(origin!==expected)return err('Invalid request origin',403);
   }
-  if(method==='GET'&&route==='config')return json({brand:'Athave AI',login:!!(env.MSG91_WIDGET_ID&&env.MSG91_AUTH_KEY&&env.SESSION_SECRET&&env.SUPABASE_URL&&env.SUPABASE_SERVICE_ROLE_KEY),payments:!!(env.RAZORPAY_KEY_ID&&env.RAZORPAY_KEY_SECRET),ai:!!env.GEMINI_API_KEY,otpMode:'server'});
+  if(method==='GET'&&route==='config')return json({brand:'Athave AI',login:!!(env.MSG91_WIDGET_ID&&env.MSG91_AUTH_KEY&&env.SESSION_SECRET&&env.SUPABASE_URL&&env.SUPABASE_SERVICE_ROLE_KEY),payments:env.PAYMENTS_ENABLED==='true'&&!!(env.RAZORPAY_KEY_ID&&env.RAZORPAY_KEY_SECRET&&env.RAZORPAY_WEBHOOK_SECRET),ai:!!env.GEMINI_API_KEY,otpMode:'server'});
   if(method==='POST'&&route==='webhooks/razorpay'){
    const raw=await request.text(),sig=request.headers.get('x-razorpay-signature')||'';
    if(!env.RAZORPAY_WEBHOOK_SECRET)return err('Webhook secret required',503);
@@ -328,6 +328,7 @@ export async function onRequest({request,env,params}){
     return json({ok:true});
   }
   if(method==='POST'&&route==='payments/order'){
+    if(env.PAYMENTS_ENABLED!=='true'||!env.RAZORPAY_KEY_ID||!env.RAZORPAY_KEY_SECRET||!env.RAZORPAY_WEBHOOK_SECRET)return err('Payments are temporarily unavailable while Razorpay setup is completed.',503);
     let d=await request.json(),plan=String(d.plan||'');if(!['starter','premium','custom'].includes(plan))return err('Invalid plan');
     let amount=plan==='starter'?499:plan==='premium'?999:Number(d.amount);
     if(!Number.isInteger(amount)||amount<100||amount>10000)return err('Custom amount must be ₹100–₹10,000');
@@ -335,6 +336,23 @@ export async function onRequest({request,env,params}){
     const order=await secureGateway(env,'POST','orders',{amount:amount*100,currency:'INR',receipt:crypto.randomUUID().replace(/-/g,'').slice(0,32)});
     await tbl(env,'POST','payments','',{customer_id:user.id,plan,amount_paise:amount*100,credits,gateway_order_id:order.id},{headers:{prefer:'return=minimal'}});
     return json({orderId:order.id,amount:amount*100,keyId:env.RAZORPAY_KEY_ID});
+  }
+  if(method==='GET'&&route==='payments/status'){
+    const oid=new URL(request.url).searchParams.get('orderId')||'';
+    if(!/^order_[A-Za-z0-9]{6,60}$/.test(oid))return err('Invalid payment order');
+    const rows=await tbl(env,'GET','payments',`?gateway_order_id=eq.${encodeURIComponent(oid)}&customer_id=eq.${user.id}&select=status,amount_paise`);
+    const order=rows?.[0];if(!order)return err('Payment order not found',404);
+    if(order.status==='paid')return json({paid:true,status:'paid'});
+    // If webhook is delayed, verify captured transactions directly with Razorpay.
+    // Never credit an authorized/failed payment, and never trust client-provided amounts.
+    if(env.RAZORPAY_KEY_ID&&env.RAZORPAY_KEY_SECRET){
+      try{
+        const list=await secureGateway(env,'GET','orders/'+encodeURIComponent(oid)+'/payments');
+        const captured=(list.items||[]).find(p=>p?.status==='captured'&&p.order_id===oid&&p.currency==='INR'&&Number(p.amount)===Number(order.amount_paise));
+        if(captured?.id){await fulfill(env,oid,captured.id);return json({paid:true,status:'paid'});}
+      }catch(ex){console.warn('Payment status reconciliation deferred:',String(ex?.message||ex).slice(0,90))}
+    }
+    return json({paid:false,status:'pending'});
   }
   if(method==='POST'&&route==='payments/verify'){
     let b=await request.json();const oid=String(b.razorpay_order_id||''),pid=String(b.razorpay_payment_id||'');
