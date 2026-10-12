@@ -25,3 +25,12 @@
   Cache-Control: public, max-age=86400
 /favicon.ico
   Cache-Control: public, max-age=86400
+
+/styles.css
+  Cache-Control: no-cache, must-revalidate
+/pwa.js
+  Cache-Control: no-cache, must-revalidate
+/app.js
+  Cache-Control: no-cache, must-revalidate
+/admin.js
+  Cache-Control: no-cache, must-revalidate
