@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 Disallow: /api/
-Sitemap: https://athave-ai.pages.dev/sitemap.xml
+Sitemap: https://athave.in/sitemap.xml
