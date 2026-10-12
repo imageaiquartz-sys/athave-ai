@@ -34,3 +34,14 @@
   Cache-Control: no-cache, must-revalidate
 /admin.js
   Cache-Control: no-cache, must-revalidate
+
+/manual.css
+  Cache-Control: no-cache, must-revalidate
+/manual-app.js
+  Cache-Control: no-cache, must-revalidate
+/manual-admin.css
+  Cache-Control: no-cache, must-revalidate
+/manual-admin.js
+  Cache-Control: no-cache, must-revalidate
+/ai/*
+  Cache-Control: no-cache, must-revalidate

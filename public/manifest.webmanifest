@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Athave AI — Product Photo Studio",
   "short_name": "Athave AI",
-  "description": "Professional product catalogue photos for clothing, shoes, watches and online business.",
+  "description": "Professional product photo editing, manual delivery within 24 hours, and a separate AI chat studio.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -37,21 +37,19 @@
   ],
   "shortcuts": [
     {
-      "name": "Create Product Photos",
-      "short_name": "Studio",
-      "url": "/create/",
-      "icons": [
-        {
-          "src": "/icons/icon-192.png",
-          "sizes": "192x192",
-          "type": "image/png"
-        }
-      ]
+      "name": "Upload product photos",
+      "short_name": "Upload",
+      "url": "/create/"
     },
     {
-      "name": "My Profile",
-      "short_name": "Profile",
+      "name": "My uploads",
+      "short_name": "Orders",
       "url": "/profile/"
+    },
+    {
+      "name": "AI Studio",
+      "short_name": "AI",
+      "url": "/ai/"
     }
   ]
 }

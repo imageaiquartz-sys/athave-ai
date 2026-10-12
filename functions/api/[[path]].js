@@ -167,10 +167,11 @@ export async function onRequest({request,env,params}){
    const event=JSON.parse(raw);
    if(event.event==='payment.captured'){
      const payment=event.payload?.payment?.entity;
-     if(payment?.order_id&&payment.id)await fulfill(env,payment.order_id,payment.id);
+     if(payment?.order_id&&payment.id){if(!await manualCapture(env,payment.order_id,payment.id))await fulfill(env,payment.order_id,payment.id);}
    }
    return json({ok:true});
   }
+  if(route.startsWith('manual/'))return await handleManual(request,env,await hasAdminSession(request,env));
   if(method==='POST'&&route==='auth/send-otp'){
    if(!env.MSG91_WIDGET_ID||!env.MSG91_AUTH_KEY||!env.SESSION_SECRET||!env.SUPABASE_URL||!env.SUPABASE_SERVICE_ROLE_KEY)
      return err('Login configuration is incomplete',503);
@@ -263,8 +264,6 @@ export async function onRequest({request,env,params}){
   }
   if(method==='POST'&&route==='analyze'){
    const body=await request.json(),images=validateInputImages(body.images),roles=photoRoles(body.roles,images.length);
-   const walletBefore=(await tbl(env,'GET','wallets',`?customer_id=eq.${user.id}&select=balance`))?.[0]?.balance||0;
-   if(walletBefore<1)return err('Add image credits to analyze and generate products. No image credits are deducted by analysis.',402);
    const hash=await fingerprintImages(images,roles);
    // Supabase performs per-customer throttling and returns cached detection results when identical photos are uploaded.
    const claim=await rpc(env,'start_analysis_request',{p_customer:user.id,p_fingerprint:hash,p_daily_max:Number(env.MAX_ANALYSES_PER_DAY||12)});
@@ -303,15 +302,16 @@ export async function onRequest({request,env,params}){
    // One credit reserved for exactly this one selected view. Failures refund the wallet credit.
    const job=await rpc(env,'reserve_generation',{p_customer:user.id,p_kind:kind,p_side:view,p_monthly_max:Number(env.AI_MONTHLY_CALL_CAP||80),p_daily_max:Number(env.MAX_GENERATIONS_PER_DAY||30)});
    try{
-    const background=body.background==='premium'?'premium':body.background==='white'?'white':null;
-    if(!background)throw Error('Choose white or premium background');
+    const background='white';
     const viewDirection={front:'front view',back:'back view',catalogue:'catalogue three-quarter view',side:'side profile',angle:'angled three-quarter view'}[view];
     const isCasual=['t-shirt','shirt','polo shirt','hoodie','jacket','dress','pants','jeans','shorts','skirt'].includes(kind);
     const isSports=/(sports|jersey|team kit|athletic|football|cricket|basketball|performance|training)/i.test(item.name+' '+item.appearance);
-    const garmentStyle=isCasual&&!isSports?'Style this as premium contemporary retail fashion or understated luxury clothing. Do NOT style an ordinary T-shirt or polo like sports kit, football jersey, teamwear or an athletic uniform. Retain its exact original cut, sleeve style, collar, hems and texture.':isSports?'It is sports apparel: keep authentic sportswear construction, sponsor/logo placement, paneling and activewear material, without inventing new sponsors.':'Choose professional commercial photography appropriate for the actual product category, not clothing photography.';
-    const backgroundStyle=background==='white'?'Background must be PURE SOLID #FFFFFF to the edge, including all four corners, with discreet realistic contact shadow only. No props, scenery, gradients or added elements.':'Create a premium restrained commercial studio scene using a subtle neutral editorial setting, refined natural light and believable contact shadows. Keep the product unobstructed and dominant. No distracting props, text, overlays or watermarks.';
-    const referenceHint=`You have ${images.length} labeled input photos showing the actual product. Honor each photo's Front/Back/Detail label. Match whichever reference shows the requested side. If the requested side cannot be seen, only make conservative plausible unseen geometry and NEVER invent conspicuous brands, prints, markings or text.`;
-    const prompt=`Photorealistic PREMIUM PROFESSIONAL E-COMMERCE PRODUCT PHOTOGRAPHY. Make exactly ONE square image showing ONLY the real detected product: ${item.name}, category ${kind}. Target: ${viewDirection}. Visible details: ${item.appearance}. Reference location: ${item.location}. ${referenceHint} Preserve ALL physical details of the selected item from the photos: precise contours, fabric weave, folds, seams, pockets, buttons, collars, prints, all real logos and symbols (without creating new ones), stitching, texture, material finish, colors, ports, knobs, labels, clips, laces, straps and included attachments. Do not remove, swap, simplify, replace, recolor, rearrange or invent any part of the product. For a computer mouse keep its buttons, scroll wheel and actual silhouette; for footwear keep eyelets, sole, stitching and logos; for clothes keep exact neckline, pattern and real placement. If there are other distinct items, remove those other items and the original person's body/hands/background but NEVER remove components belonging to this item. ${garmentStyle} Show the entire item, fully visible, correct proportions, straight, centered, never cropped. Natural realistic product shape and lighting, elegant premium catalog quality, no mannequin head/body, no hangers, no artificial sports models. ${backgroundStyle} Output ONLY the finished product photograph, 1:1 square, no caption or extra images.`;
+    const isPolo=kind==='polo shirt';
+    const isTee=kind==='t-shirt';
+    const garmentStyle=isPolo&&!isSports?'This is a polo shirt. Render an accurate professional catalogue front or back view like a premium ecommerce apparel sample: clean collar, placket, sleeve hems and overall polo structure clearly visible. Do NOT make it look like a T-shirt or sports jersey. Preserve exact logo placement, buttons, trim and fabric texture.':isTee&&!isSports?'This is a regular T-shirt. Render it as a premium fashion ecommerce T-shirt, not a polo shirt and not sportswear. Preserve the true neckline, sleeves, print placement and fabric texture.':isCasual&&!isSports?'Style this as premium contemporary retail fashion or understated luxury clothing. Do NOT style an ordinary clothing item like sports kit, football jersey, teamwear or an athletic uniform. Retain its exact original cut, sleeve style, collar, hems and texture.':isSports?'It is sports apparel: keep authentic sportswear construction, sponsor/logo placement, paneling and activewear material, without inventing new sponsors.':'Choose professional commercial photography appropriate for the actual product category, not clothing photography.';
+    const backgroundStyle='Background must be PURE SOLID #FFFFFF to the edge, including all four corners, with discreet realistic contact shadow only. No props, scenery, gradients or added elements.';
+    const referenceHint=`You have ${images.length} labeled input photos showing the actual product. Honor each photo's Front/Back/Detail label. Match whichever reference shows the requested side. If two or more distinct products appear in one upload photo, isolate ONLY the selected product and exclude the other items. If the requested side cannot be seen, only make conservative plausible unseen geometry and NEVER invent conspicuous brands, prints, markings or text.`;
+    const prompt=`Photorealistic PREMIUM PROFESSIONAL E-COMMERCE PRODUCT PHOTOGRAPHY. Make exactly ONE square image showing ONLY the real detected product: ${item.name}, category ${kind}. Target: ${viewDirection}. Visible details: ${item.appearance}. Reference location: ${item.location}. ${referenceHint} Preserve ALL physical details of the selected item from the photos: precise contours, fabric weave, folds, seams, pockets, buttons, collars, prints, all real logos and symbols (without creating new ones), stitching, texture, material finish, colors, ports, knobs, labels, clips, laces, straps and included attachments. Do not remove, swap, simplify, replace, recolor, rearrange or invent any part of the product. For a computer mouse keep its buttons, scroll wheel and actual silhouette; for footwear keep eyelets, sole, stitching and logos; for clothes keep exact neckline, pattern and real placement. If there are other distinct items, remove those other items and the original person's body/hands/background but NEVER remove components belonging to this item. ${garmentStyle} Show the entire item, fully visible, correct proportions, straight, centered, never cropped. Natural realistic product shape and lighting, elegant premium catalog quality. No mannequin head/body, no hangers, no lifestyle scenery, no artificial sports models. ${backgroundStyle} Output ONLY the finished product photograph, 1:1 square, no caption or extra images.`;
     const parts=await gemini(env,[{text:prompt},...referenceParts(images,roles)],env.GEMINI_IMAGE_MODEL||'gemini-3.1-flash-lite-image',{responseModalities:['TEXT','IMAGE'],imageConfig:{aspectRatio:'1:1',imageSize:'1K'}});
     const part=parts.find(p=>p.inlineData?.data&&p.inlineData?.mimeType?.startsWith('image/'));
     if(!part)throw Error('AI returned no picture. Check Gemini image model access.');
@@ -435,3 +435,231 @@ export async function onRequest({request,env,params}){
  }catch(ex){return errorResponse(ex)}
 }
 async function hmacHex(secret,message){let key=await crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);let sig=new Uint8Array(await crypto.subtle.sign('HMAC',key,enc.encode(message)));return [...sig].map(x=>x.toString(16).padStart(2,'0')).join('')}
+
+// V16 no-login manual-photo service. Separate signed HttpOnly guest cookie; never expose service key.
+const MANUAL_COOKIE='athave_manual_guest', MANUAL_BUCKET='athave-manual';
+const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+async function guestSession(req,env){
+ const token=cookies(req)[MANUAL_COOKIE];if(!token||!env.SESSION_SECRET)return null;
+ const [p,mac,extra]=token.split('.');if(!p||!mac||extra||await hmac(env.SESSION_SECRET+':manual',p)!==mac)return null;
+ try{const data=JSON.parse(new TextDecoder().decode(unb64url(p)));return UUID_RE.test(data.id)&&data.exp>Date.now()?data.id:null}catch{return null}
+}
+async function makeGuestCookie(env,id){
+ const payload=b64url(enc.encode(JSON.stringify({id,exp:Date.now()+180*86400000})));
+ return setCookie(MANUAL_COOKIE,payload+'.'+await hmac(env.SESSION_SECRET+':manual',payload),180*86400);
+}
+async function guestUser(req,env){const id=await guestSession(req,env);if(!id)return null;
+ return (await tbl(env,'GET','manual_customers',`?id=eq.${encodeURIComponent(id)}&select=id,display_name,contact`))?.[0]||null;
+}
+async function guestEntitlement(env,guestId){
+ const membership=(await tbl(env,'GET','manual_memberships',`?customer_id=eq.${guestId}&select=period_start,period_end,upload_cap,used`))?.[0]||null;
+ const active=!!membership&&new Date(membership.period_end).getTime()>Date.now();
+ return {active,periodEnd:membership?.period_end||null,uploadCap:active?membership.upload_cap:0,used:active?membership.used:0,remaining:active?Math.max(0,membership.upload_cap-membership.used):0};
+}
+async function manualUploadList(env,guestId){
+ const uploads=await tbl(env,'GET','manual_uploads',`?customer_id=eq.${guestId}&status=neq.uploading&select=id,batch_id,filename,status,created_at&order=created_at.desc&limit=300`);
+ if(!uploads?.length)return [];
+ const ids=uploads.map(x=>x.id).join(',');const results=await tbl(env,'GET','manual_outputs',`?upload_id=in.(${ids})&select=id,upload_id,filename,created_at&order=created_at.desc&limit=500`);
+ return uploads.map(x=>({...x,deliveries:results.filter(y=>y.upload_id===x.id).map(({id,filename,created_at})=>({id,filename,created_at}))}));
+}
+function validManualImage(file,maxBytes){
+ if(!file||typeof file.arrayBuffer!=='function')throw Error('Choose an image file');
+ if(!['image/png','image/jpeg','image/webp'].includes(file.type))throw Error('Upload JPG, PNG or WebP only');
+ if(!file.size||file.size>maxBytes)throw Error('Maximum '+Math.floor(maxBytes/1048576)+' MB per image');
+ const suffix={'image/png':'png','image/jpeg':'jpg','image/webp':'webp'}[file.type];
+ const fileName=String(file.name||'product-image.'+suffix).replace(/[\x00-\x1F<>]/g,'').slice(0,150);
+ return {suffix,fileName};
+}
+async function manualFileFromStorage(env,path,mime,downloadName=''){
+ const r=await supa(env,'GET',`/storage/v1/object/${MANUAL_BUCKET}/${path}`,null,{response:true});
+ if(!r.ok)return err('Image unavailable',404);
+ const headers={'content-type':mime||r.headers.get('content-type')||'image/jpeg','cache-control':'private, no-store','x-content-type-options':'nosniff'};
+ if(downloadName)headers['content-disposition']=`attachment; filename="${downloadName.replace(/[^a-zA-Z0-9._-]/g,'_')}"`;
+ return new Response(r.body,{status:200,headers});
+}
+async function manualVerifyPayment(env,order,paymentId){
+ const gateway=await secureGateway(env,'GET','payments/'+encodeURIComponent(paymentId));
+ if(gateway.status!=='captured'||gateway.order_id!==order.gateway_order_id||gateway.currency!=='INR'||Number(gateway.amount)!==Number(order.amount_paise))throw Error('Payment capture not confirmed');
+ await rpc(env,'manual_apply_paid_order',{p_order:order.gateway_order_id,p_gateway_payment:paymentId});
+}
+async function manualCapture(env,orderId,paymentId){
+ const orders=await tbl(env,'GET','manual_payments',`?gateway_order_id=eq.${encodeURIComponent(orderId)}&select=*`);
+ if(!orders?.length)return false;
+ await manualVerifyPayment(env,orders[0],paymentId);return true;
+}
+async function manualAi(env,user,data){
+ const message=String(data.message||'').trim().slice(0,2500);
+ if(!message)return err('Enter a message for AI');
+ const images=data.images||[];
+ if(!Array.isArray(images)||images.length>3)return err('Up to 3 reference photos per AI request');
+ const parts=[];
+ for(const img of images){
+  if(!img||img.mime!=='image/jpeg'||typeof img.data!=='string'||img.data.length>1400000||!/^[A-Za-z0-9+/=]+$/.test(img.data))return err('Invalid reference photo');
+  parts.push({inlineData:{mimeType:'image/jpeg',data:img.data}});
+ }
+ const mode=data.mode==='image'?'image':'chat';
+ if(!env.GEMINI_API_KEY)return err('AI studio is not configured yet',503);
+ const history=Array.isArray(data.history)?data.history.slice(-8).map(x=>({role:x.role==='assistant'?'assistant':'customer',text:String(x.text||'').slice(0,600)})):[];
+ await rpc(env,'manual_reserve_ai',{p_customer:user.id,p_image:mode==='image',p_chat_max:Math.max(1,Math.min(300,Number(env.MANUAL_AI_CHAT_MAX)||30)),p_image_max:Math.max(1,Math.min(100,Number(env.MANUAL_AI_IMAGE_MAX)||10))});
+ const instruction=mode==='image'
+  ?`Create one polished high quality 1:1 image responding to this request: ${message}. Use uploaded reference images carefully and preserve identifiable product details and logos. Return an image, and optionally a short reply.`
+  :`You are Athave AI, a concise helpful assistant for business owners, products and image creation. Be truthful; no unsupported claims. Prior messages: ${JSON.stringify(history)}. Customer request: ${message}`;
+ const answer=await gemini(env,[{text:instruction},...parts],mode==='image'?(env.GEMINI_IMAGE_MODEL||'gemini-3.1-flash-lite-image'):(env.ANALYSIS_MODEL||'gemini-3.5-flash-lite'),mode==='image'?{responseModalities:['TEXT','IMAGE'],imageConfig:{aspectRatio:'1:1',imageSize:'1K'}}:{temperature:0.5,maxOutputTokens:1200});
+ const reply=answer.filter(x=>typeof x.text==='string').map(x=>x.text).join('\n').slice(0,5000);
+ if(mode==='chat')return json({reply:reply||'No text response was returned.'});
+ const pic=answer.find(x=>x.inlineData?.data&&x.inlineData?.mimeType?.startsWith('image/'));
+ if(!pic)return err('AI did not return an image this time',502);
+ // AI images are served only to the signed guest and saved privately; never public URLs.
+ const raw=Uint8Array.from(atob(pic.inlineData.data),c=>c.charCodeAt(0));
+ if(raw.byteLength>8500000)throw Error('Generated image too large');
+ const id=crypto.randomUUID(),type=pic.inlineData.mimeType,extension=type.includes('jpeg')?'jpg':type.includes('webp')?'webp':'png';
+ const key=`${user.id}/ai/${id}.${extension}`;
+ const stored=await supa(env,'POST',`/storage/v1/object/${MANUAL_BUCKET}/${key}`,raw,{raw:true,headers:{'content-type':type,'x-upsert':'false'},response:true});
+ if(!stored.ok)throw Error('AI image storage failed');
+ // Limited image history is intentionally kept in manual_ai_images for re-downloads.
+ await tbl(env,'POST','manual_ai_images','',{id,customer_id:user.id,object_path:key,mime_type:type,prompt:message},{headers:{prefer:'return=minimal'}});
+ return json({reply:reply||'Your image is ready.',imageId:id});
+}
+async function handleManual(req,env,isAdmin){
+ const method=req.method.toUpperCase(),url=new URL(req.url),route=url.pathname.replace(/^\/api\/manual\/?/,'');
+ if(!env.SESSION_SECRET||!env.SUPABASE_URL||!env.SUPABASE_SERVICE_ROLE_KEY)return err('Manual service configuration is incomplete',503);
+ const admin=route.startsWith('admin/');
+ if(admin&&!isAdmin)return err('Unlock the admin dashboard first',401);
+ let user=null;if(!admin&&route!=='start'&&route!=='recover'){
+  user=await guestUser(req,env);if(!user)return err('This device has no order session. Open My uploads to create one.',401);
+ }
+ if(route==='start'&&method==='POST'){
+  let existing=await guestUser(req,env);if(existing)return json({customer:existing,entitlement:await guestEntitlement(env,existing.id),new:false});
+  const id=crypto.randomUUID(),recovery='ATV-'+Array.from(crypto.getRandomValues(new Uint8Array(20)),x=>x.toString(16).padStart(2,'0')).join('').toUpperCase();
+  const name='Customer '+id.slice(0,8).toUpperCase();
+  await tbl(env,'POST','manual_customers','',{id,display_name:name,recovery_hash:await sha(recovery)},{headers:{prefer:'return=minimal'}});
+  return json({customer:{id,display_name:name,contact:''},entitlement:{active:false,uploadCap:0,used:0,remaining:0},recoveryKey:recovery,new:true},200,{'set-cookie':await makeGuestCookie(env,id)});
+ }
+ if(route==='recover'&&method==='POST'){
+  const {code}=await req.json();const value=String(code||'').trim().toUpperCase();
+  if(!/^ATV-[0-9A-F]{40}$/.test(value))return err('Invalid recovery code',400);
+  const rows=await tbl(env,'GET','manual_customers',`?recovery_hash=eq.${encodeURIComponent(await sha(value))}&select=id,display_name,contact`);
+  if(!rows?.length)return err('Recovery code not found',404);
+  return json({customer:rows[0],restored:true},200,{'set-cookie':await makeGuestCookie(env,rows[0].id)});
+ }
+ if(route==='status'&&method==='GET'){await rpc(env,'manual_refund_stale_uploads',{p_customer:user.id});return json({customer:user,entitlement:await guestEntitlement(env,user.id)});}
+ if(route==='rotate-recovery'&&method==='POST'){
+  const key='ATV-'+Array.from(crypto.getRandomValues(new Uint8Array(20)),x=>x.toString(16).padStart(2,'0')).join('').toUpperCase();
+  await tbl(env,'PATCH','manual_customers',`?id=eq.${user.id}`,{recovery_hash:await sha(key),updated_at:new Date().toISOString()},{headers:{prefer:'return=minimal'}});
+  return json({recoveryKey:key});
+ }
+
+ if(route==='update-customer'&&method==='POST'){
+  const data=await req.json(),name=String(data.name||'').trim().slice(0,70),contact=String(data.contact||'').trim().slice(0,90);
+  if(name.length<2)return err('Enter your name or shop name');
+  await tbl(env,'PATCH','manual_customers',`?id=eq.${user.id}`,{display_name:name,contact,updated_at:new Date().toISOString()},{headers:{prefer:'return=minimal'}});
+  return json({saved:true});
+ }
+ if(route==='uploads'&&method==='GET')return json({uploads:await manualUploadList(env,user.id)});
+ if(route==='upload'&&method==='POST'){
+  const f=await req.formData(),file=f.get('file');const info=validManualImage(file,8*1048576);
+  const batch=String(f.get('batch')||'');const batchId=UUID_RE.test(batch)?batch:crypto.randomUUID();
+  const uploadId=await rpc(env,'manual_reserve_upload',{p_customer:user.id,p_batch:batchId,p_filename:info.fileName,p_mime:file.type});
+  const path=`${user.id}/${uploadId}/source.${info.suffix}`;
+  try{
+   const fileBytes=await file.arrayBuffer();
+   const save=await supa(env,'POST',`/storage/v1/object/${MANUAL_BUCKET}/${path}`,fileBytes,{raw:true,headers:{'content-type':file.type,'x-upsert':'false'},response:true});
+   if(!save.ok)throw Error('Storage upload failed (HTTP '+save.status+')');
+   await rpc(env,'manual_confirm_upload',{p_customer:user.id,p_upload:uploadId,p_path:path});
+   return json({id:uploadId,batchId,status:'processing',message:'Processing. Results expected within 24 hours.'});
+  }catch(ex){await rpc(env,'manual_cancel_upload',{p_customer:user.id,p_upload:uploadId}).catch(()=>{});throw ex}
+ }
+ if(route==='file'&&method==='GET'){
+  const kind=url.searchParams.get('kind'),id=url.searchParams.get('id');if(!UUID_RE.test(id||''))return err('Invalid file ID');
+  if(kind==='source'){
+   const rows=await tbl(env,'GET','manual_uploads',`?id=eq.${id}&customer_id=eq.${user.id}&select=source_path,mime_type`);
+   if(!rows?.[0]?.source_path)return err('Image not found',404);
+   return manualFileFromStorage(env,rows[0].source_path,rows[0].mime_type);
+  }
+  if(kind==='result'){
+   const rows=await tbl(env,'GET','manual_outputs',`?id=eq.${id}&select=id,upload_id,object_path,filename,mime_type`);
+   if(!rows?.length)return err('Image not found',404);
+   const own=await tbl(env,'GET','manual_uploads',`?id=eq.${rows[0].upload_id}&customer_id=eq.${user.id}&select=id`);
+   if(!own?.length)return err('Image not found',404);
+   return manualFileFromStorage(env,rows[0].object_path,rows[0].mime_type,rows[0].filename);
+  }
+  return err('Unknown file type');
+ }
+ if(route==='plan/order'&&method==='POST'){
+  if(env.PAYMENTS_ENABLED!=='true'||!env.RAZORPAY_KEY_ID||!env.RAZORPAY_KEY_SECRET||!env.RAZORPAY_WEBHOOK_SECRET)return err('Razorpay payments are not configured',503);
+  const data=await req.json(),kind=data.kind; if(kind!=='month'&&kind!=='addon')return err('Invalid plan');
+  const plan=await guestEntitlement(env,user.id);
+  if(kind==='month'&&plan.active)return err('Your monthly plan is still active');
+  if(kind==='addon'&&(!plan.active||plan.remaining>0))return err('Add-on is available after your current 50 uploads are used');
+  const amount=kind==='month'?49900:9900;
+  const order=await secureGateway(env,'POST','orders',{amount,currency:'INR',receipt:'atv'+crypto.randomUUID().replace(/-/g,'').slice(0,28)});
+  await tbl(env,'POST','manual_payments','',{customer_id:user.id,kind,amount_paise:amount,gateway_order_id:order.id},{headers:{prefer:'return=minimal'}});
+  return json({orderId:order.id,keyId:env.RAZORPAY_KEY_ID,amount,kind});
+ }
+ if(route==='plan/verify'&&method==='POST'){
+  const d=await req.json();const orderId=String(d.razorpay_order_id||''),paymentId=String(d.razorpay_payment_id||''),sig=String(d.razorpay_signature||'');
+  if(!/^order_[A-Za-z0-9]{6,60}$/.test(orderId)||!/^pay_[A-Za-z0-9]{6,60}$/.test(paymentId)||!sig)return err('Invalid payment details');
+  const orders=await tbl(env,'GET','manual_payments',`?gateway_order_id=eq.${encodeURIComponent(orderId)}&customer_id=eq.${user.id}&select=*`);
+  if(!orders?.length)return err('Payment not found',404);
+  if(await hmacHex(env.RAZORPAY_KEY_SECRET,orderId+'|'+paymentId)!==sig)return err('Payment signature mismatch',403);
+  await manualVerifyPayment(env,orders[0],paymentId);
+  return json({paid:true,entitlement:await guestEntitlement(env,user.id)});
+ }
+ if(route==='plan/status'&&method==='GET'){
+  const orderId=url.searchParams.get('orderId')||'';
+  if(!/^order_[A-Za-z0-9]{6,60}$/.test(orderId))return err('Invalid order ID');
+  const list=await tbl(env,'GET','manual_payments',`?gateway_order_id=eq.${encodeURIComponent(orderId)}&customer_id=eq.${user.id}&select=*`);
+  const payment=list?.[0];if(!payment)return err('Unknown order',404);
+  if(payment.status==='paid')return json({paid:true,entitlement:await guestEntitlement(env,user.id)});
+  const transaction=await secureGateway(env,'GET','orders/'+encodeURIComponent(orderId)+'/payments');
+  const captured=(transaction.items||[]).find(p=>p.order_id===orderId&&p.status==='captured'&&p.currency==='INR'&&Number(p.amount)===payment.amount_paise);
+  if(captured){await manualVerifyPayment(env,payment,captured.id);return json({paid:true,entitlement:await guestEntitlement(env,user.id)})}
+  return json({paid:false});
+ }
+ if(route==='ai'&&method==='POST')return manualAi(env,user,await req.json());
+ if(route==='ai/file'&&method==='GET'){
+  const id=url.searchParams.get('id');if(!UUID_RE.test(id||''))return err('Invalid AI image');
+  const rows=await tbl(env,'GET','manual_ai_images',`?id=eq.${id}&customer_id=eq.${user.id}&select=object_path,mime_type`);
+  if(!rows?.length)return err('AI image not found',404);
+  const extension=rows[0].mime_type==='image/jpeg'?'jpg':rows[0].mime_type==='image/webp'?'webp':'png';
+  return manualFileFromStorage(env,rows[0].object_path,rows[0].mime_type,'athave-ai-'+id+'.'+extension);
+ }
+ if(route==='admin/customers'&&method==='GET'){
+  const customers=await tbl(env,'GET','manual_customers','?select=id,display_name,contact,created_at&order=created_at.desc&limit=300');
+  const uploads=await tbl(env,'GET','manual_uploads','?status=neq.uploading&select=customer_id,status,created_at&order=created_at.desc&limit=3000');
+  return json({customers:customers.map(x=>({...x,total:uploads.filter(u=>u.customer_id===x.id).length,processing:uploads.filter(u=>u.customer_id===x.id&&u.status==='processing').length}))});
+ }
+ if(route==='admin/customer'&&method==='GET'){
+  const customerId=url.searchParams.get('id')||'';if(!UUID_RE.test(customerId))return err('Invalid customer ID');
+  const customer=(await tbl(env,'GET','manual_customers',`?id=eq.${customerId}&select=id,display_name,contact,created_at`))?.[0];
+  if(!customer)return err('Customer not found',404);
+  return json({customer,uploads:await manualUploadList(env,customerId),entitlement:await guestEntitlement(env,customerId)});
+ }
+ if(route==='admin/file'&&method==='GET'){
+  const id=url.searchParams.get('id'),kind=url.searchParams.get('kind');if(!UUID_RE.test(id||''))return err('Invalid file ID');
+  if(kind==='source'){
+   const rows=await tbl(env,'GET','manual_uploads',`?id=eq.${id}&select=source_path,mime_type`);
+   if(!rows?.[0]?.source_path)return err('File not found',404);
+   return manualFileFromStorage(env,rows[0].source_path,rows[0].mime_type);
+  }
+  if(kind==='result'){
+   const rows=await tbl(env,'GET','manual_outputs',`?id=eq.${id}&select=object_path,mime_type`);
+   if(!rows?.length)return err('File not found',404);
+   return manualFileFromStorage(env,rows[0].object_path,rows[0].mime_type);
+  }
+  return err('Unknown file type');
+ }
+ if(route==='admin/deliver'&&method==='POST'){
+  const form=await req.formData(),id=String(form.get('uploadId')||'');if(!UUID_RE.test(id))return err('Invalid upload');
+  const file=form.get('file'),info=validManualImage(file,12*1048576);
+  const source=(await tbl(env,'GET','manual_uploads',`?id=eq.${id}&status=in.(processing,completed)&select=id,customer_id`))?.[0];
+  if(!source)return err('Upload unavailable',404);
+  const path=`${source.customer_id}/${id}/result/${crypto.randomUUID()}.${info.suffix}`;
+  const saved=await supa(env,'POST',`/storage/v1/object/${MANUAL_BUCKET}/${path}`,await file.arrayBuffer(),{raw:true,headers:{'content-type':file.type,'x-upsert':'false'},response:true});
+  if(!saved.ok)throw Error('Result image upload failed');
+  await tbl(env,'POST','manual_outputs','',{upload_id:id,object_path:path,filename:info.fileName,mime_type:file.type},{headers:{prefer:'return=minimal'}});
+  await tbl(env,'PATCH','manual_uploads',`?id=eq.${id}`,{status:'completed',updated_at:new Date().toISOString()},{headers:{prefer:'return=minimal'}});
+  return json({delivered:true});
+ }
+ return err('Unknown manual service route',404);
+}

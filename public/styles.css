@@ -503,3 +503,6 @@ body[data-page="profile"] .profile-head{margin-top:20px}
 .background-choice legend{display:block;float:none;width:100%;padding:0;margin-bottom:12px}
 .background-choice>.background-option{flex:1 1 calc(50% - 10px);max-width:calc(50% - 5px)}
 @media(max-width:420px){.background-choice>.background-option{padding:10px 8px;gap:7px}}
+
+.option-card{background:#fff;border-bottom:1px solid #f0f1f3}.option-card:last-child{border-bottom:0}.static-row{cursor:default}.redeem-inline-card .static-row{border-bottom:0;min-height:62px;padding-bottom:8px}.redeem-inline-card .redeem-panel{margin:0 16px 16px;border-radius:14px;border:1px solid #edf0f3;background:#fafbfc}.redeem-inline-card .redeem-form{display:flex;gap:10px;align-items:center}.login-row b,.login-row .option-icon,.login-row .option-chevron{color:#198754}.logout-row b,.logout-row .option-icon,.logout-row .option-chevron{color:#dc3746}.login-row{cursor:pointer}.background-choice{display:none!important}
+@media(max-width:520px){.redeem-inline-card .redeem-form{flex-direction:column;align-items:stretch}.redeem-inline-card .redeem-panel{margin:0 12px 12px}}

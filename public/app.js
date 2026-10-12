@@ -70,7 +70,7 @@ if ($('backBtn')) $('backBtn').onclick=()=>{
 };
 // Authentication stays in an HttpOnly cookie. A short-lived, per-tab display cache
 // removes redundant DB calls when navigating back to the profile; never store OTPs/tokens.
-const ACCOUNT_KEY='athave_account_v3', ACCOUNT_TTL=180000;
+const ACCOUNT_KEY='athave_account_v4', ACCOUNT_TTL=300000;
 let sectionLoaded={}; let accountRequest=null;
 function sectionForPage(){return page==='history'?'history':page==='payments'?'payments':'profile'}
 function saveAccount(){try{sessionStorage.setItem(ACCOUNT_KEY,JSON.stringify({me,sectionLoaded}))}catch{}}
@@ -113,23 +113,26 @@ function renderUser(){
   $('profileVerified').setAttribute('aria-disabled',String(signed));
  }
  if($('signActionLabel'))$('signActionLabel').textContent=signed?'Log out':'Log in';
- if($('signOut'))$('signOut').setAttribute('aria-label',signed?'Log out':'Log in');
+ if($('signOut')){
+  $('signOut').setAttribute('aria-label',signed?'Log out':'Log in');
+  $('signOut').classList.toggle('login-row',!signed);
+  $('signOut').classList.toggle('logout-row',signed);
+ }
+ const signIcon=$('signActionIcon');
+ if(signIcon){
+  signIcon.innerHTML=signed
+   ? '<path d="M14 4h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5M10 8l-4 4 4 4M6 12h11"></path>'
+   : '<path d="M10 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5"></path><path d="M14 8l4 4-4 4"></path><path d="M10 12h8"></path>';} 
  if($('walletRemaining'))$('walletRemaining').textContent=me?.wallet?.balance??'—';
  if($('walletPurchased'))$('walletPurchased').textContent=me?.wallet?.purchased??'—';
  if($('walletUsed'))$('walletUsed').textContent=me?.wallet?.used??'—';
- if($('uploadWallet'))$('uploadWallet').textContent=me?.wallet?.balance??'Sign in';
- if($('progressFill'))$('progressFill').style.width=me?.wallet?.purchased?Math.min(100,100*me.wallet.used/me.wallet.purchased)+'%':'0%';
+ if($('uploadWallet'))$('uploadWallet').textContent=me?.wallet?.balance??'—';
+  if($('progressFill'))$('progressFill').style.width=me?.wallet?.purchased?Math.min(100,100*me.wallet.used/me.wallet.purchased)+'%':'0%';
  for(const badge of document.querySelectorAll('.header-admin-badge'))show(badge,!!me?.user?.isAdmin);
  if(page==='history')renderHistory();
  if(page==='payments')renderPayments();
 }
 if($('profileVerified'))$('profileVerified').addEventListener('click',e=>{e.preventDefault();if(!me?.user)openLogin()});
-if($('redeemToggle'))$('redeemToggle').onclick=()=>{
- const panel=$('redeemPanel'),button=$('redeemToggle');
- if(!panel)return;
- panel.hidden=!panel.hidden;button.setAttribute('aria-expanded',String(!panel.hidden));
- if(!panel.hidden)$('redeemInput')?.focus();
-};
 window.addEventListener('storage',e=>{if(e.key==='athave_auth_changed')clearAccount()});
 async function ensureLogin(next){
  if(me?.user&&Date.now()-(sectionLoaded.profile||0)<ACCOUNT_TTL)return true;
@@ -241,10 +244,7 @@ function loader(title,message,count='',percent=0){
  document.body.classList.add('is-studio-busy');
 }
 function hideLoader(){show($('studioLoader'),false);document.body.classList.remove('is-studio-busy')}
-const outputBackground=()=>document.querySelector('input[name="background"]:checked')?.value||'white';
-for(const input of document.querySelectorAll('input[name="background"]'))input.addEventListener('change',()=>{
- for(const label of document.querySelectorAll('.background-option'))label.classList.toggle('is-active',label.querySelector('input').checked);
-});
+const outputBackground=()=> 'white';
 async function encodePhoto(file){
  let bmp=await createImageBitmap(file),scale=Math.min(1,900/Math.max(bmp.width,bmp.height));
  let c=document.createElement('canvas');c.width=Math.round(bmp.width*scale);c.height=Math.round(bmp.height*scale);
@@ -265,7 +265,6 @@ function invalidateAnalysis(){
 function updateSelection(){
  const total=chosenOutputs.size;
  if($('selectedCount'))$('selectedCount').textContent=String(total);
- if($('creditCount'))$('creditCount').textContent=String(total);
  if($('generateBtn'))$('generateBtn').disabled=!analysisPlan||!total||generating;
  if($('generateLabel'))$('generateLabel').textContent=total?`Generate ${total} image${total===1?'':'s'}`:'Choose your views';
 }
@@ -283,11 +282,10 @@ function renderSelectionCards(){
    const btn=document.createElement('button');btn.type='button';btn.className='view-card';btn.setAttribute('aria-pressed','false');btn.dataset.key=key;
    const glyph=document.createElement('span');glyph.className='view-card-icon';glyph.innerHTML=view==='front'?'<svg viewBox="0 0 24 24"><path d="M12 20V4m-6 6 6-6 6 6"/></svg>':view==='back'?'<svg viewBox="0 0 24 24"><path d="M12 4v16m-6-6 6 6 6-6"/></svg>':view==='side'?'<svg viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></svg>':'<svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 9h6v6"/></svg>';
    const words=document.createElement('span');words.className='view-card-label';words.textContent=analysisPlan.views?.[view]||view;
-   const unit=document.createElement('small');unit.textContent='1 credit';
+   const unit=document.createElement('small');unit.textContent='White background';
    btn.append(glyph,words,unit);
    btn.onclick=()=>{
     if(chosenOutputs.has(key))chosenOutputs.delete(key);
-    else if(chosenOutputs.size>=MAX_SELECTABLE_OUTPUTS){pageStatus(`Select up to ${MAX_SELECTABLE_OUTPUTS} images in one batch.`,true);return}
     else chosenOutputs.add(key);
     for(const card of root.querySelectorAll('.view-card')){const active=chosenOutputs.has(card.dataset.key);card.classList.toggle('is-selected',active);card.setAttribute('aria-pressed',String(active))}
     updateSelection();pageStatus('');
@@ -324,13 +322,11 @@ async function generate(){
  const targets=[...chosenOutputs].map(key=>{const [itemId,view]=key.split('|');const item=analysisPlan.items.find(x=>x.id===itemId);return item?{itemId,view,item}:null}).filter(Boolean);
  if(!targets.length)return pageStatus('Choose at least one image view.',true);
  if(!await ensureLogin(generate))return;
- await refresh({force:true,quiet:true,section:'profile'});
- if((me?.wallet?.balance??0)<targets.length)return pageStatus(`Need ${targets.length} credits. You have ${me?.wallet?.balance??0}. Top up first.`,true);
  generating=true;const background=outputBackground();updateSelection();let made=[],errors=[];
  try{
   for(let i=0;i<targets.length;i++){
    const target=targets[i],label=`${target.item.name} — ${analysisPlan.views[target.view]}`;
-   loader('Creating your images',`Generating ${target.item.name} · ${analysisPlan.views[target.view]} · ${background==='premium'?'Premium background':'White background'}`,`${i+1} of ${targets.length}`,Math.round(5+80*i/targets.length));
+   loader('Creating your images',`Generating ${target.item.name} · ${analysisPlan.views[target.view]} · Pure white background`,`${i+1} of ${targets.length}`,Math.round(5+80*i/targets.length));
    try{
     const job=await post('generate',{images:analyzedImages,roles:analyzedRoles,analysisToken:analysisPlan.analysisToken,itemId:target.itemId,view:target.view,background});
     made.push({id:job.id,label:job.label||label,kind:job.kind,side:job.side});storeResults(made);
