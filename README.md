@@ -1,3 +1,69 @@
+# Athave AI V9 — SEO-optimized website + V8 generation features
+
+This is a **complete GitHub + Cloudflare Pages project**, forked directly from V8. It retains your existing Supabase database, MSG91 OTP, selected-view generation, admin dashboard, Razorpay top-ups and redeem-code logic. **No new SQL** required beyond the V8 patch you have already run.
+
+## Installation
+1. Back up the current GitHub repository. Extract this ZIP and upload its **contents**, not the ZIP, to your existing `athave-ai` repository on the `main` branch, overwriting prior files. Cloudflare Pages deployment stays build command `exit 0`, output directory `public`, framework None.
+2. Keep your configured production Cloudflare secrets intact. SEO does not need additional API keys.
+3. When the deploy succeeds, confirm `https://athave-ai.pages.dev/robots.txt`, `https://athave-ai.pages.dev/sitemap.xml`, homepage and `/solutions/`. Check `https://athave-ai.pages.dev/admin/` separately, but do not submit it for indexing.
+4. Open [Google Search Console](https://search.google.com/search-console/) and add a **URL-prefix property** for `https://athave-ai.pages.dev/` (or verify your real custom domain first). Use DNS or HTML tag verification as offered. Paste the provided Search Console meta verification tag into `public/index.html` if using tag method; Cloudflare redeploy is needed.
+5. Submit `https://athave-ai.pages.dev/sitemap.xml` in Search Console → Sitemaps, then inspect the home page, `/solutions/` and `/about/`. Indexing is not immediate or guaranteed.
+6. Use Google [Rich Results Test](https://search.google.com/test/rich-results) and [PageSpeed Insights](https://pagespeed.web.dev/) for further validation. 
+
+## How this SEO package works
+- Optimized unique titles/descriptions, Open Graph/Twitter cards, canonical links, local image preview and descriptive alt text. Includes a 1200×630 Open Graph social share image.
+- **12 editorial public guides and business solution pages** with readable sections, buyer advice and real navigation. Avoid misleading claims: AI may infer hidden product details, and marketplace acceptance is never guaranteed.
+- `Organization`, `WebSite` and `WebApplication` JSON-LD plus `founder` and `creator` entities for **Sabith Salah K P** and **Quartz Web Solutions**, with direct official links only where relevant. Founder remains off the customer Profile page.
+- `robots.txt` and a sitemap of public URLs only; admin, private payment, account and results pages use noindex / are excluded.
+- `SEO-STRATEGY/ATHAVE-1000-KEYWORD-MAP.csv` (and `.xlsx`) contain **1,000 candidate search phrases** grouped by target page and intent for future marketing—not a spam block to inject into HTML. Volumes and rankings are NOT independently verified.
+- SEO content uses consistent `Athave AI` branding. Avoid keyword stuffing, doorway pages, duplicate descriptions and deceptive JSON-LD; Google ignores the meta-keywords tag.
+
+## Canonical domain (important)
+This package currently uses **https://athave-ai.pages.dev** because that is your established live domain. If you purchase and connect `athave.in` or another domain, **do not merely change links before DNS works**. Once it is live and verified, run `python tools/set_seo_domain.py https://YOUR-REAL-DOMAIN` to replace canonical links, Open Graph URLs and sitemap entries. Redirect the pages.dev hostname to the custom domain where possible, then verify the new Search Console property. DNS and registrar ownership are not established by this ZIP.
+
+## Branded rankings
+Optimized SEO does not make any site automatically #1 for `Athave`, `Athave AI`, `athave.in`, 1,000 keywords or other broad searches. Brand uniqueness, consistent mentions, real backlinks, indexed pages and time matter. Build truthful brand links from your verified channels and your developer Quartz Web Solutions website. Search Console impressions and queries should guide which content to expand.
+
+## Trust and privacy
+Keep admin auth separate from customer auth; an ID-only admin access code is **not sufficient** for public deployment with customer phone numbers or payment details. Put admin behind Cloudflare Access or stronger authentication. `robots.txt` and `noindex` are not security measures. Never publish your Gemini, MSG91, Supabase service-role or Razorpay secret keys.
+
+## V8 feature reminder
+The app **analyzes first** (vision API may cost a small amount) and creates only user-selected product views (one selected output = one image-generation request and one image credit). Existing SQL and configured APIs must remain operational. Your live platform should still be tested end-to-end.
+
+### Prior project usage notes
+# Athave AI V9 — SEO-optimized website + V8 generation features
+
+This is a **complete GitHub + Cloudflare Pages project**, forked directly from V8. It retains your existing Supabase database, MSG91 OTP, selected-view generation, admin dashboard, Razorpay top-ups and redeem-code logic. **No new SQL** required beyond the V8 patch you have already run.
+
+## Installation
+1. Back up the current GitHub repository. Extract this ZIP and upload its **contents**, not the ZIP, to your existing `athave-ai` repository on the `main` branch, overwriting prior files. Cloudflare Pages deployment stays build command `exit 0`, output directory `public`, framework None.
+2. Keep your configured production Cloudflare secrets intact. SEO does not need additional API keys.
+3. When the deploy succeeds, confirm `https://athave-ai.pages.dev/robots.txt`, `https://athave-ai.pages.dev/sitemap.xml`, homepage and `/solutions/`. Check `https://athave-ai.pages.dev/admin/` separately, but do not submit it for indexing.
+4. Open [Google Search Console](https://search.google.com/search-console/) and add a **URL-prefix property** for `https://athave-ai.pages.dev/` (or verify your real custom domain first). Use DNS or HTML tag verification as offered. Paste the provided Search Console meta verification tag into `public/index.html` if using tag method; Cloudflare redeploy is needed.
+5. Submit `https://athave-ai.pages.dev/sitemap.xml` in Search Console → Sitemaps, then inspect the home page, `/solutions/` and `/about/`. Indexing is not immediate or guaranteed.
+6. Use Google [Rich Results Test](https://search.google.com/test/rich-results) and [PageSpeed Insights](https://pagespeed.web.dev/) for further validation. 
+
+## How this SEO package works
+- Optimized unique titles/descriptions, Open Graph/Twitter cards, canonical links, local image preview and descriptive alt text. Includes a 1200×630 Open Graph social share image.
+- **12 editorial public guides and business solution pages** with readable sections, buyer advice and real navigation. Avoid misleading claims: AI may infer hidden product details, and marketplace acceptance is never guaranteed.
+- `Organization`, `WebSite` and `WebApplication` JSON-LD plus `founder` and `creator` entities for **Sabith Salah K P** and **Quartz Web Solutions**, with direct official links only where relevant. Founder remains off the customer Profile page.
+- `robots.txt` and a sitemap of public URLs only; admin, private payment, account and results pages use noindex / are excluded.
+- `SEO-STRATEGY/ATHAVE-1000-KEYWORD-MAP.csv` (and `.xlsx`) contain **1,000 candidate search phrases** grouped by target page and intent for future marketing—not a spam block to inject into HTML. Volumes and rankings are NOT independently verified.
+- SEO content uses consistent `Athave AI` branding. Avoid keyword stuffing, doorway pages, duplicate descriptions and deceptive JSON-LD; Google ignores the meta-keywords tag.
+
+## Canonical domain (important)
+This package currently uses **https://athave-ai.pages.dev** because that is your established live domain. If you purchase and connect `athave.in` or another domain, **do not merely change links before DNS works**. Once it is live and verified, run `python tools/set_seo_domain.py https://YOUR-REAL-DOMAIN` to replace canonical links, Open Graph URLs and sitemap entries. Redirect the pages.dev hostname to the custom domain where possible, then verify the new Search Console property. DNS and registrar ownership are not established by this ZIP.
+
+## Branded rankings
+Optimized SEO does not make any site automatically #1 for `Athave`, `Athave AI`, `athave.in`, 1,000 keywords or other broad searches. Brand uniqueness, consistent mentions, real backlinks, indexed pages and time matter. Build truthful brand links from your verified channels and your developer Quartz Web Solutions website. Search Console impressions and queries should guide which content to expand.
+
+## Trust and privacy
+Keep admin auth separate from customer auth; an ID-only admin access code is **not sufficient** for public deployment with customer phone numbers or payment details. Put admin behind Cloudflare Access or stronger authentication. `robots.txt` and `noindex` are not security measures. Never publish your Gemini, MSG91, Supabase service-role or Razorpay secret keys.
+
+## V8 feature reminder
+The app **analyzes first** (vision API may cost a small amount) and creates only user-selected product views (one selected output = one image-generation request and one image credit). Existing SQL and configured APIs must remain operational. Your live platform should still be tested end-to-end.
+
+### Prior project usage notes
 # Athave AI V8 — Selective, low-waste image generation
 
 This is a **full replacement website**, with the current Cloudflare Pages Functions backend, Supabase customer/payment/redeem integration, MSG91 OTP login, one-time top-ups, admin dashboard and the new two-step product workflow.
