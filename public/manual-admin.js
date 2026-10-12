@@ -23,13 +23,14 @@ function renderStats(){const customers=people.length,uploads=people.reduce((n,p)
 }
 function renderCard(root,c){const card=document.createElement('button');card.type='button';card.className='admin-customer-card';card.setAttribute('aria-label','Open uploads for '+c.display_name);
  const top=document.createElement('div');top.className='admin-customer-top';const avatar=document.createElement('span');avatar.className='m-avatar';const avatarImg=document.createElement('img');avatarImg.src='/assets/account-avatar.svg';avatarImg.alt='';avatarImg.width=45;avatarImg.height=45;avatarImg.setAttribute('aria-hidden','true');avatar.append(avatarImg);
- const desc=document.createElement('div');const title=document.createElement('strong');title.textContent=c.display_name||'Customer';const contact=document.createElement('small');contact.textContent=c.contact||'Athave customer';desc.append(title,contact);top.append(avatar,desc);
+ const desc=document.createElement('div');const title=document.createElement('strong');title.textContent=c.display_name||'Customer';const contact=document.createElement('small');contact.textContent=(c.phone?('+91 '+c.phone.slice(2,7)+' '+c.phone.slice(-5)):c.contact)||'Athave customer';desc.append(title,contact);top.append(avatar,desc);
  const foot=document.createElement('div');foot.className='admin-card-counts';const total=document.createElement('span');total.textContent=(c.total||0)+' uploaded';const pending=document.createElement('strong');pending.className=c.processing?'admin-pending':'admin-clear';pending.textContent=c.processing?c.processing+' processing':'Up to date';foot.append(total,pending);
+ if(c.freeAccess){const badge=document.createElement('span');badge.className='admin-free-pill';badge.textContent='Free access';foot.append(badge)}
  card.append(top,foot);card.onclick=()=>openCustomer(c.id);root.append(card);
 }
 function renderCustomers(){
  const query=$('searchCustomers').value.toLowerCase().trim(),allQuery=$('searchAllCustomers').value.toLowerCase().trim(),filter=$('uploadFilter').value;
- const match=(p,q)=>!q||[p.display_name,p.contact,p.id].some(x=>String(x||'').toLowerCase().includes(q));
+ const match=(p,q)=>!q||[p.display_name,p.contact,p.phone,p.id].some(x=>String(x||'').toLowerCase().includes(q));
  const active=people.filter(c=>c.total>0&&match(c,query)&&(filter==='pending'?c.processing>0:filter==='completed'?c.total>c.processing:true)).sort((a,b)=>b.processing-a.processing||b.total-a.total);
  const uploadsRoot=$('customerCards');uploadsRoot.replaceChildren();$('totalCustomerCount').textContent='('+active.length+')';for(const c of active)renderCard(uploadsRoot,c);
  if(!active.length)uploadsRoot.innerHTML='<div class="m-empty">No matching upload orders.</div>';
@@ -57,12 +58,22 @@ function makeUploadRow(upload,customerId){const row=document.createElement('arti
 }
 async function openCustomer(id,{scroll=true}={}){selectedCustomerId=id;changeTab('uploads');$('customerDetail').hidden=false;$('detailName').textContent='Loading customer…';$('detailUploads').replaceChildren();
  try{const info=await req('manual/admin/customer?id='+encodeURIComponent(id));if(id!==selectedCustomerId)return;
- $('detailName').textContent=info.customer.display_name;$('detailContact').textContent=info.customer.contact||'Verified customer workspace';const stats=$('detailSummary');stats.replaceChildren();const n=(info.uploads||[]).length;const pending=info.uploads.filter(x=>x.status==='processing').length;
- for(const text of [n+' uploads',pending+' processing',info.entitlement.active?info.entitlement.remaining+' uploads remaining':'Plan inactive']){const tag=document.createElement('span');tag.textContent=text;stats.append(tag)}
+ $('detailName').textContent=info.customer.display_name;$('detailContact').textContent=info.customer.contact||people.find(p=>p.id===id)?.phone||'Verified customer workspace';
+ const free=!!info.entitlement.freeAccess;const control=$('adminAccessButton');const accessState=$('adminAccessState');control.disabled=false;control.dataset.enabled=String(free);control.textContent=free?'End free access':'Grant free access';control.className='m-btn '+(free?'m-secondary':'m-primary')+' m-small';accessState.textContent=free?'Active — no payment needed. End access at any time.':'Not granted. Paid plans still work normally.';
+ const stats=$('detailSummary');stats.replaceChildren();const n=(info.uploads||[]).length;const pending=info.uploads.filter(x=>x.status==='processing').length;
+ for(const text of [n+' uploads',pending+' processing',info.entitlement.freeAccess?'Complimentary access':info.entitlement.active?info.entitlement.remaining+' uploads remaining':'Plan inactive']){const tag=document.createElement('span');tag.textContent=text;stats.append(tag)}
  const root=$('detailUploads');root.replaceChildren();for(const item of info.uploads||[])root.append(makeUploadRow(item,id));if(!n)root.innerHTML='<div class="m-empty">This customer has not uploaded any photos yet.</div>';
  if(scroll)$('customerDetail').scrollIntoView({behavior:'smooth',block:'start'});
  }catch(ex){note(ex.message,true)}
 }
+$('adminAccessButton').onclick=async()=>{
+ const id=selectedCustomerId;if(!id)return;
+ const enabled=$('adminAccessButton').dataset.enabled==='true',action=enabled?'revoke':'grant';
+ if(enabled&&!confirm('End this customer’s complimentary access? Their paid plan, if any, will remain intact.'))return;
+ const btn=$('adminAccessButton');btn.disabled=true;
+ try{await post('manual/admin/access',{customerId:id,action});await loadCustomers();await openCustomer(id,{scroll:false});note(action==='grant'?'Free access granted.':'Free access ended.');}
+ catch(ex){note(ex.message,true);btn.disabled=false}
+};
 $('closeDetail').onclick=()=>{$('customerDetail').hidden=true;selectedCustomerId=null};
 $('refreshAdmin').onclick=async()=>{try{await loadCustomers();if(selectedCustomerId)await openCustomer(selectedCustomerId,{scroll:false})}catch(e){note(e.message,true)}};
 $('refreshOverview').onclick=()=>loadCustomers().catch(e=>note(e.message,true));

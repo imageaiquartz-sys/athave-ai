@@ -1,6 +1,6 @@
 /* Athave AI V14 cache refresh: public static files only.
    Never cache API results, authenticated pages, sessions, uploads or payment data. */
-const CACHE = 'athave-static-v21-luxury-hero-studio-20261013';
+const CACHE = 'athave-static-v22-gallery-free-access-studio-20261013';
 const STATIC = [
   '/offline.html', '/favicon.png', '/favicon-48.png', '/favicon.ico',
   '/manual.css', '/manual-app.js', '/manual-admin.css', '/manual-admin.js', '/luxury-theme.css', '/luxury-admin.css', '/pwa.js', '/manifest.webmanifest',

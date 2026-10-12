@@ -133,3 +133,59 @@ body[data-page="ai"] #aiMessage:empty,body[data-page="ai"] #aiMessage[hidden]{di
 body[data-page="ai"] #aiMessage{flex:0 0 auto;margin:0;font-size:12px;padding:3px 8px;color:#79532f}
 @media(max-width:800px){.m-hero-art.m-luxury-hero-image{width:100%;height:auto!important;aspect-ratio:1/1}body[data-page="ai"] .m-ai-page{width:calc(100% - 18px);padding:6px 0 8px}body[data-page="ai"] .m-ai-thread{padding:16px 13px}body[data-page="ai"] .m-ai-compose{padding:11px 12px}body[data-page="ai"] #aiPrompt{font-size:14px;max-height:90px;min-height:43px}body[data-page="ai"] .m-tool,body[data-page="ai"] .m-mode-button{min-height:41px;padding:9px 11px}body[data-page="ai"] .m-ai-send-button{min-height:41px;padding:10px 14px}}
 @media(max-width:400px){body[data-page="ai"] .m-ai-tools{gap:6px}body[data-page="ai"] .m-tool,body[data-page="ai"] .m-mode-button{font-size:11px;padding:9px 8px;gap:5px}body[data-page="ai"] .m-ai-send-button{padding:10px 11px}body[data-page="ai"] .m-ai-send-button span{display:none}body[data-page="ai"] .m-ai-toolbar{gap:5px}}
+
+/* V22: larger brand + navigation, easy-to-access gallery, height-safe AI Studio. */
+.m-nav{height:94px;gap:22px;margin-top:0}
+.m-logo{flex:0 0 auto}.m-logo img{width:202px;max-height:69px;height:auto;object-fit:contain}
+.m-links{font-size:14px;gap:3px;padding:5px}.m-links a{padding:13px 18px;font-weight:800;white-space:nowrap}
+.m-links a[aria-current="page"]{background:#eee0ca;color:#593d25}
+.m-upload-app{padding-top:17px}.m-upload-app>.m-page-head{margin-bottom:20px}
+.m-upload-app .m-page-head h1,.m-gallery-app .m-page-head h1{font-size:clamp(40px,4.6vw,56px)}
+.m-upload-shortcut{margin-bottom:21px}
+.m-gallery-promo{display:flex;align-items:center;gap:18px;padding:17px 22px;border-radius:21px;border:1px solid #dac4a6;background:linear-gradient(108deg,#fffdf9,#efdfca);box-shadow:0 9px 29px #67421b12;max-width:100%;transition:transform .18s,border-color .18s}
+.m-gallery-promo:hover{border-color:#b28b5b;transform:translateY(-1px)}
+.m-gallery-promo-mark{display:grid;place-items:center;width:49px;height:49px;flex:0 0 auto;border-radius:15px;background:#624934;color:#fff;font-size:24px}
+.m-gallery-promo strong,.m-gallery-promo small{display:block}.m-gallery-promo strong{font-size:18px;color:#3b3024}.m-gallery-promo small{font-size:12px;color:#86725d;margin-top:5px}.m-gallery-promo>span:last-child{margin-left:auto;font-size:23px;color:#946d43}
+.m-gallery-app{padding-top:23px;min-height:68vh}.m-gallery-page-head{margin-bottom:28px}
+.m-customer-gallery{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px}.m-customer-gallery>.m-empty{grid-column:1/-1}
+.m-gallery-item{min-width:0;border:1px solid #e1cfb6;border-radius:19px;overflow:hidden;background:#fffcf7;box-shadow:0 12px 26px #70552c10}
+.m-gallery-image{display:block;aspect-ratio:1;overflow:hidden;background:#f0e4d3}.m-gallery-image img{width:100%;height:100%;display:block;object-fit:contain;transition:transform .2s}.m-gallery-image:hover img{transform:scale(1.025)}
+.m-gallery-caption{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:15px}
+.m-gallery-caption>div{min-width:0}.m-gallery-caption strong{font-size:13px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.m-gallery-caption small{display:block;color:#967e60;margin-top:4px;font-size:11px}
+.m-gallery-download{display:inline-flex;flex:0 0 auto;align-items:center;font-size:11px;font-weight:850;background:#f0e2cd;color:#715034;border:1px solid #dcc6a7;border-radius:14px;padding:10px}
+.m-gallery-download:hover{background:#e5d0b3}.m-gallery-actions{text-align:center;margin:28px auto}
+/* Grid tracks bound the chat card to the real viewport; thread alone scrolls. */
+html:has(body[data-page="ai"]){height:100%;overflow:hidden}
+body[data-page="ai"]{box-sizing:border-box;height:100vh;height:100dvh;max-height:100dvh;min-height:0!important;overflow:hidden!important;display:grid!important;grid-template-rows:auto minmax(0,1fr)}
+body[data-page="ai"] .m-header{min-height:0;flex:none}
+body[data-page="ai"] .m-nav{height:80px;margin-top:0}
+body[data-page="ai"] .m-ai-page{box-sizing:border-box;min-height:0!important;height:100%!important;max-height:100%!important;overflow:hidden;padding:4px 0 max(8px,env(safe-area-inset-bottom));width:min(1460px,calc(100% - 32px));display:flex;flex-direction:column;gap:5px}
+body[data-page="ai"] .m-ai-box{height:100%!important;min-height:0!important;max-height:100%!important;flex:1 1 0;display:flex;flex-direction:column;overflow:hidden}
+body[data-page="ai"] .m-ai-thread{flex:1 1 0;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+body[data-page="ai"] .m-ai-compose{min-width:0;flex:none;padding:11px 17px 12px}
+body[data-page="ai"] #aiPrompt{resize:none;min-height:42px;max-height:92px}
+body[data-page="ai"] .m-ai-mini-note{line-height:14px;margin:0!important;flex-shrink:0}
+body[data-page="ai"] .m-ai-tools{flex-wrap:nowrap}
+@media(max-width:1020px){.m-logo img{width:175px}.m-links a{padding:11px 13px}.m-nav{gap:10px}.m-customer-gallery{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:700px){
+ .m-wrap{width:calc(100% - 24px)}
+ .m-nav,body[data-page="ai"] .m-nav{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:54px 43px;height:101px;min-height:0;gap:0 6px;padding-bottom:4px;margin-top:0;align-content:center}
+ .m-logo{grid-column:1;grid-row:1;justify-self:start}.m-logo img{width:165px;max-height:51px}
+ .m-account{grid-column:2;grid-row:1;justify-self:end;min-height:36px;padding:9px 12px}
+ .m-links{grid-column:1/-1;grid-row:2;justify-self:stretch;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;min-width:0;max-width:100%;padding:3px;border-radius:16px;background:#fff9f0c9}
+ .m-links a{text-align:center;padding:9px 2px;font-size:12.5px;line-height:1.25;border-radius:12px}
+ .m-links a:nth-child(3){display:block!important}
+ .m-upload-app{padding-top:11px}.m-gallery-app{padding-top:14px}
+ .m-upload-app>.m-page-head{margin-bottom:17px}
+ .m-upload-app .m-page-head h1,.m-gallery-app .m-page-head h1{font-size:clamp(35px,9vw,44px)}
+ .m-customer-gallery{grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+ .m-gallery-caption{display:flex;flex-direction:column;align-items:stretch;gap:9px;padding:11px}
+ .m-gallery-download{align-self:stretch;justify-content:center}
+ .m-gallery-promo{padding:12px 15px;gap:11px}.m-gallery-promo-mark{width:42px;height:42px}
+ body[data-page="ai"] .m-ai-page{width:calc(100% - 12px);padding:3px 0 max(5px,env(safe-area-inset-bottom))}
+ body[data-page="ai"] .m-ai-compose{padding:10px 11px 10px}
+ body[data-page="ai"] .m-tool,body[data-page="ai"] .m-mode-button{min-height:41px;padding:9px 10px}
+ body[data-page="ai"] .m-ai-thread{padding:15px 13px}
+}
+@media(max-width:370px){.m-logo img{width:150px}.m-links a{font-size:11.5px}.m-gallery-promo strong{font-size:16px}}
+@media(max-height:530px){body[data-page="ai"] .m-nav{height:62px!important;grid-template-rows:62px;display:flex;gap:10px}body[data-page="ai"] .m-links{display:flex;padding:2px}body[data-page="ai"] .m-links a{padding:7px 8px;font-size:11px}body[data-page="ai"] .m-logo img{width:116px}body[data-page="ai"] #aiPrompt{min-height:32px;height:36px}body[data-page="ai"] .m-ai-compose{padding:5px 9px}body[data-page="ai"] .m-ai-mini-note{font-size:10px}}

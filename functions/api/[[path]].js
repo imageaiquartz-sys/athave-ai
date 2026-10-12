@@ -452,10 +452,17 @@ async function makeGuestCookie(env,id){
 async function guestUser(req,env){const id=await guestSession(req,env);if(!id)return null;
  return (await tbl(env,'GET','manual_customers',`?id=eq.${encodeURIComponent(id)}&select=id,display_name,contact`))?.[0]||null;
 }
+async function hasComplimentaryAccess(env,customerId){
+ const rows=await tbl(env,'GET','manual_access_grants',`?customer_id=eq.${encodeURIComponent(customerId)}&active=eq.true&select=customer_id&limit=1`);
+ return !!rows?.length;
+}
 async function guestEntitlement(env,guestId){
+ // Admin-granted access is independent of purchases: revoking never removes a paid membership.
+ const complimentary=await hasComplimentaryAccess(env,guestId);
  const membership=(await tbl(env,'GET','manual_memberships',`?customer_id=eq.${guestId}&select=period_start,period_end,upload_cap,used`))?.[0]||null;
- const active=!!membership&&new Date(membership.period_end).getTime()>Date.now();
- return {active,periodEnd:membership?.period_end||null,uploadCap:active?membership.upload_cap:0,used:active?membership.used:0,remaining:active?Math.max(0,membership.upload_cap-membership.used):0};
+ const paidActive=!!membership&&new Date(membership.period_end).getTime()>Date.now();
+ if(complimentary)return {active:true,kind:'admin',freeAccess:true,periodEnd:null,uploadCap:null,used:null,remaining:null};
+ return {active:paidActive,kind:paidActive?'paid':'none',freeAccess:false,periodEnd:paidActive?membership.period_end:null,uploadCap:paidActive?membership.upload_cap:0,used:paidActive?membership.used:0,remaining:paidActive?Math.max(0,membership.upload_cap-membership.used):0};
 }
 async function manualUploadList(env,guestId){
  const uploads=await tbl(env,'GET','manual_uploads',`?customer_id=eq.${guestId}&status=neq.uploading&select=id,batch_id,filename,status,created_at&order=created_at.desc&limit=300`);
@@ -501,7 +508,8 @@ async function manualAi(env,user,data){
  const mode=data.mode==='image'?'image':'chat';
  if(!env.GEMINI_API_KEY)return err('AI studio is not configured yet',503);
  const history=Array.isArray(data.history)?data.history.slice(-8).map(x=>({role:x.role==='assistant'?'assistant':'customer',text:String(x.text||'').slice(0,600)})):[];
- await rpc(env,'manual_reserve_ai',{p_customer:user.id,p_image:mode==='image',p_chat_max:Math.max(1,Math.min(300,Number(env.MANUAL_AI_CHAT_MAX)||30)),p_image_max:Math.max(1,Math.min(100,Number(env.MANUAL_AI_IMAGE_MAX)||10))});
+ const granted=await hasComplimentaryAccess(env,user.id);
+ await rpc(env,granted?'manual_free_reserve_ai':'manual_reserve_ai',{p_customer:user.id,p_image:mode==='image',p_chat_max:Math.max(1,Math.min(300,Number(env.MANUAL_AI_CHAT_MAX)||30)),p_image_max:Math.max(1,Math.min(100,Number(env.MANUAL_AI_IMAGE_MAX)||10))});
  const instruction=mode==='image'
   ?`Create one polished high quality 1:1 image responding to this request: ${message}. Use uploaded reference images carefully and preserve identifiable product details and logos. Return an image, and optionally a short reply.`
   :`You are Athave AI, a concise helpful assistant for business owners, products and image creation. Be truthful; no unsupported claims. Prior messages: ${JSON.stringify(history)}. Customer request: ${message}`;
@@ -587,7 +595,7 @@ async function handleManual(req,env,isAdmin){
   return json({customer:linked,entitlement:await guestEntitlement(env,linked.id),new:false});
  }
  if(route==='recover'||route==='rotate-recovery')return err('Use mobile OTP to access your orders',410);
- if(route==='status'&&method==='GET'){await rpc(env,'manual_refund_stale_uploads',{p_customer:user.id});return json({customer:user,entitlement:await guestEntitlement(env,user.id)});}
+ if(route==='status'&&method==='GET'){await rpc(env,'manual_free_cleanup_uploads',{p_customer:user.id});await rpc(env,'manual_refund_stale_uploads',{p_customer:user.id});return json({customer:user,entitlement:await guestEntitlement(env,user.id)});}
 
  if(route==='update-customer'&&method==='POST'){
   const data=await req.json(),name=String(data.name||'').trim().slice(0,70),contact=String(data.contact||'').trim().slice(0,90);
@@ -596,19 +604,26 @@ async function handleManual(req,env,isAdmin){
   return json({saved:true});
  }
  if(route==='uploads'&&method==='GET')return json({uploads:await manualUploadList(env,user.id)});
+ if(route==='gallery/results'&&method==='GET'){
+  const offset=Math.max(0,Math.min(100000,Number.parseInt(url.searchParams.get('offset')||'0',10)||0));
+  const count=30;
+  const rows=await tbl(env,'GET','manual_customer_gallery',`?customer_id=eq.${encodeURIComponent(user.id)}&select=id,filename,created_at,upload_filename&order=created_at.desc,id.desc&limit=${count+1}&offset=${offset}`);
+  return json({images:(rows||[]).slice(0,count),nextOffset:rows?.length>count?offset+count:null});
+ }
  if(route==='payments'&&method==='GET'){const records=await tbl(env,'GET','manual_payments',`?customer_id=eq.${user.id}&select=id,kind,amount_paise,status,created_at,paid_at&order=created_at.desc&limit=100`);return json({payments:records||[]});}
  if(route==='upload'&&method==='POST'){
   const f=await req.formData(),file=f.get('file');const info=validManualImage(file,8*1048576);
   const batch=String(f.get('batch')||'');const batchId=UUID_RE.test(batch)?batch:crypto.randomUUID();
-  const uploadId=await rpc(env,'manual_reserve_upload',{p_customer:user.id,p_batch:batchId,p_filename:info.fileName,p_mime:file.type});
+  const complimentary=await hasComplimentaryAccess(env,user.id);
+  const uploadId=await rpc(env,complimentary?'manual_free_reserve_upload':'manual_reserve_upload',{p_customer:user.id,p_batch:batchId,p_filename:info.fileName,p_mime:file.type});
   const path=`${user.id}/${uploadId}/source.${info.suffix}`;
   try{
    const fileBytes=await file.arrayBuffer();
    const save=await supa(env,'POST',`/storage/v1/object/${MANUAL_BUCKET}/${path}`,fileBytes,{raw:true,headers:{'content-type':file.type,'x-upsert':'false'},response:true});
    if(!save.ok)throw Error('Storage upload failed (HTTP '+save.status+')');
-   await rpc(env,'manual_confirm_upload',{p_customer:user.id,p_upload:uploadId,p_path:path});
+   await rpc(env,complimentary?'manual_free_confirm_upload':'manual_confirm_upload',{p_customer:user.id,p_upload:uploadId,p_path:path});
    return json({id:uploadId,batchId,status:'processing',message:'Processing. Results expected within 24 hours.'});
-  }catch(ex){await rpc(env,'manual_cancel_upload',{p_customer:user.id,p_upload:uploadId}).catch(()=>{});throw ex}
+  }catch(ex){await rpc(env,complimentary?'manual_free_cancel_upload':'manual_cancel_upload',{p_customer:user.id,p_upload:uploadId}).catch(()=>{});throw ex}
  }
  if(route==='file'&&method==='GET'){
   const kind=url.searchParams.get('kind'),id=url.searchParams.get('id');if(!UUID_RE.test(id||''))return err('Invalid file ID');
@@ -622,7 +637,7 @@ async function handleManual(req,env,isAdmin){
    if(!rows?.length)return err('Image not found',404);
    const own=await tbl(env,'GET','manual_uploads',`?id=eq.${rows[0].upload_id}&customer_id=eq.${user.id}&select=id`);
    if(!own?.length)return err('Image not found',404);
-   return manualFileFromStorage(env,rows[0].object_path,rows[0].mime_type,rows[0].filename);
+   return manualFileFromStorage(env,rows[0].object_path,rows[0].mime_type,url.searchParams.get('preview')==='1'?'':rows[0].filename);
   }
   return err('Unknown file type');
  }
@@ -666,9 +681,27 @@ async function handleManual(req,env,isAdmin){
   return manualFileFromStorage(env,rows[0].object_path,rows[0].mime_type,'athave-ai-'+id+'.'+extension);
  }
  if(route==='admin/customers'&&method==='GET'){
-  const customers=await tbl(env,'GET','manual_customers','?select=id,display_name,contact,created_at&order=created_at.desc&limit=300');
+  const customers=await tbl(env,'GET','manual_customers','?select=id,display_name,contact,account_customer_id,created_at&order=created_at.desc&limit=300');
   const uploads=await tbl(env,'GET','manual_uploads','?status=neq.uploading&select=customer_id,status,created_at&order=created_at.desc&limit=3000');
-  return json({customers:customers.map(x=>({...x,total:uploads.filter(u=>u.customer_id===x.id).length,processing:uploads.filter(u=>u.customer_id===x.id&&u.status==='processing').length}))});
+  const grants=await tbl(env,'GET','manual_access_grants','?active=eq.true&select=customer_id&limit=3000');
+  const granted=new Set((grants||[]).map(g=>g.customer_id));
+  const accountIds=customers.map(c=>c.account_customer_id).filter(x=>UUID_RE.test(x||''));
+  const accounts=accountIds.length?await tbl(env,'GET','customers',`?id=in.(${accountIds.join(',')})&select=id,phone&limit=300`):[];
+  const phones=new Map(accounts.map(a=>[a.id,a.phone]));
+  return json({customers:customers.map(x=>({...x,phone:phones.get(x.account_customer_id)||null,freeAccess:granted.has(x.id),total:uploads.filter(u=>u.customer_id===x.id).length,processing:uploads.filter(u=>u.customer_id===x.id&&u.status==='processing').length}))});
+ }
+ if(route==='admin/access'&&method==='POST'){
+  const body=await req.json(),id=String(body.customerId||''),action=String(body.action||'');
+  if(!UUID_RE.test(id))return err('Invalid customer ID');
+  if(!['grant','revoke'].includes(action))return err('Invalid access action');
+  const exists=await tbl(env,'GET','manual_customers',`?id=eq.${id}&select=id`);
+  if(!exists?.length)return err('Customer not found',404);
+  if(action==='grant'){
+   await tbl(env,'POST','manual_access_grants','?on_conflict=customer_id',{customer_id:id,active:true,granted_at:new Date().toISOString(),ended_at:null},{headers:{prefer:'resolution=merge-duplicates,return=minimal'}});
+  }else{
+   await tbl(env,'PATCH','manual_access_grants',`?customer_id=eq.${id}`,{active:false,ended_at:new Date().toISOString()},{headers:{prefer:'return=minimal'}});
+  }
+  return json({saved:true,freeAccess:action==='grant'});
  }
  if(route==='admin/customer'&&method==='GET'){
   const customerId=url.searchParams.get('id')||'';if(!UUID_RE.test(customerId))return err('Invalid customer ID');

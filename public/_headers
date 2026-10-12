@@ -13,6 +13,10 @@
 /results/*
   X-Robots-Tag: noindex, nofollow, noarchive
 
+/gallery/*
+  X-Robots-Tag: noindex, nofollow, noarchive
+  Cache-Control: no-store
+
 /api/*
   Cache-Control: no-store
 

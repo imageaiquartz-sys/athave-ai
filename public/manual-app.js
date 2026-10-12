@@ -87,6 +87,11 @@ async function loadGallery(){
  const feature=$('showcaseImg1')?.parentElement; if(feature){feature.classList.add('m-stone-image','m-showcase-fullview'); feature.classList.remove('m-showcase-default-cutout');}
 }
 function date(d){return d?new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—'}
+async function refreshEntitlement(){
+ if(!authUser)return;
+ const state=await request('status');entitlement=state.entitlement;customer=state.customer||customer;
+ writeCache(CACHE_KEYS.session,{customer,entitlement,ts:Date.now()});renderPlan();
+}
 async function initSession(){
  const fresh=await post('start',{});
  customer=fresh.customer;entitlement=fresh.entitlement;
@@ -95,24 +100,23 @@ async function initSession(){
  return fresh;
 }
 function renderPlan(){
- const e=entitlement||{};
- if($('planRemaining'))$('planRemaining').textContent=e.active?e.remaining:0;
- if($('planUsage'))$('planUsage').textContent=e.active?e.used+' / '+e.uploadCap:'No active plan';
- if($('planUntil'))$('planUntil').textContent=e.active?date(e.periodEnd):'—';
- if($('planAction')){$('planAction').textContent=!e.active?'Start ₹499 plan →':e.remaining===0?'Add 50 uploads for ₹99 →':'Manage plan →';}
- if($('profilePlan'))$('profilePlan').textContent=e.active?'Active monthly plan':'No active plan';
- if($('profileGuestName'))$('profileGuestName').textContent=customer?.display_name||authUser?.name||'Your account';
- if($('profileBalance'))$('profileBalance').textContent=e.active?e.remaining+' of '+e.uploadCap:'0';
- if($('profileEnd'))$('profileEnd').textContent=e.active?date(e.periodEnd):'—';
- if($('profilePlanAction'))$('profilePlanAction').textContent=!e.active?'Start plan →':e.remaining===0?'Buy 50 uploads →':'Manage plan →';
- if($('pricingBalance'))$('pricingBalance').textContent=e.active?`${e.remaining} of ${e.uploadCap} uploads available`:'No active plan';
- if($('pricingDeadline'))$('pricingDeadline').textContent=e.active?'Plan ends '+date(e.periodEnd):'Start your 30-day plan to upload photos.';
+ const e=entitlement||{},free=e.active&&e.freeAccess;
+ if($('planRemaining'))$('planRemaining').textContent=free?'∞':e.active?e.remaining:0;
+ if($('planUsage'))$('planUsage').textContent=free?'Admin access':e.active?e.used+' / '+e.uploadCap:'No active plan';
+ if($('planUntil'))$('planUntil').textContent=free?'Until revoked':e.active?date(e.periodEnd):'—';
+ if($('planAction'))$('planAction').textContent=free?'My gallery →':!e.active?'Start ₹499 plan →':e.remaining===0?'Add 50 uploads →':'View plans →';
+ if($('planAction'))$('planAction').href=free?'/gallery/':'/topup/';
+ if($('profileRemaining'))$('profileRemaining').textContent=free?'∞':e.active?e.remaining:0;
+ if($('profileEnd'))$('profileEnd').textContent=free?'Free access':e.active?date(e.periodEnd):'—';
+ if($('profilePlanAction'))$('profilePlanAction').textContent=free?'View my gallery →':!e.active?'Start plan →':e.remaining===0?'Buy 50 uploads →':'Manage plan →';
+ if($('profilePlanAction'))$('profilePlanAction').href=free?'/gallery/':'/topup/';
+ if($('pricingBalance'))$('pricingBalance').textContent=free?'Complimentary access provided by admin':e.active?`${e.remaining} of ${e.uploadCap} uploads available`:'No active plan';
+ if($('pricingDeadline'))$('pricingDeadline').textContent=free?'Access stays active until your admin ends it. Daily AI safety limits apply.':e.active?'Plan ends '+date(e.periodEnd):'Start your 30-day plan to upload photos.';
  for(const button of document.querySelectorAll('[data-buy]')){
-  const kind=button.dataset.buy;button.disabled=kind==='month'?!!e.active:!e.active||e.remaining>0;
-  button.title=kind==='month'&&e.active?'Already active':kind==='addon'&&(!e.active||e.remaining>0)?'Available after your uploads are used':'';
+  const kind=button.dataset.buy;button.disabled=free||(kind==='month'?!!e.active:!e.active||e.remaining>0);
+  button.title=free?'Complimentary access is active':kind==='month'&&e.active?'Already active':kind==='addon'&&(!e.active||e.remaining>0)?'Available after your uploads are used':'';
  }
 }
-
 function mimeOk(file){return ['image/jpeg','image/png','image/webp'].includes(file.type)&&file.size>0&&file.size<=8*1048576}
 function imageUrl(id,type='source'){return API+'file?kind='+encodeURIComponent(type)+'&id='+encodeURIComponent(id)}
 function drawUploads(root,list){if(!root)return;root.replaceChildren();if(!list.length){root.innerHTML='<div class="m-empty">No uploads yet. <a href="/create/" style="text-decoration:underline">Start uploading →</a></div>';return}
@@ -130,6 +134,31 @@ function drawUploads(root,list){if(!root)return;root.replaceChildren();if(!list.
  }
 }
 async function loadUploads(){const response=await request('uploads');drawUploads($('allUploads'),response.uploads);drawUploads($('recentUploads'),response.uploads.slice(0,4));}
+let galleryNextOffset=0,galleryLoading=false;
+async function loadCustomerGallery(reset=false){
+ const root=$('galleryGrid'),more=$('galleryMore');if(!root||galleryLoading)return;
+ if(reset){galleryNextOffset=0;root.replaceChildren();}
+ if(galleryNextOffset===null)return;
+ galleryLoading=true;if(more){more.disabled=true;more.textContent='Loading…';}
+ try{
+  const data=await request('gallery/results?offset='+galleryNextOffset);
+  const items=data.images||[];
+  if(reset&&!items.length){root.innerHTML='<div class="m-empty">Your finished photos will appear here as soon as our team delivers them. <a class="m-link" href="/create/">Upload photos →</a></div>';}
+  for(const item of items){
+   const card=document.createElement('article');card.className='m-gallery-item';
+   const imageLink=document.createElement('a');imageLink.href=imageUrl(item.id,'result')+'&preview=1';imageLink.target='_blank';imageLink.rel='noopener noreferrer';imageLink.className='m-gallery-image';
+   const image=document.createElement('img');image.src=imageLink.href;image.loading='lazy';image.alt='Finished image: '+item.filename;imageLink.append(image);
+   const footer=document.createElement('div');footer.className='m-gallery-caption';
+   const info=document.createElement('div'),title=document.createElement('strong'),meta=document.createElement('small');title.textContent=item.filename;meta.textContent=date(item.created_at);info.append(title,meta);
+   const button=document.createElement('a');button.className='m-gallery-download';button.href=imageUrl(item.id,'result');button.download=item.filename;button.setAttribute('aria-label','Download '+item.filename);button.textContent='Download ↓';
+   footer.append(info,button);card.append(imageLink,footer);root.append(card);
+  }
+  galleryNextOffset=data.nextOffset??null;if(more)more.hidden=galleryNextOffset===null;
+  msg('',false,'galleryMessage');
+ }catch(e){msg(e.message,true,'galleryMessage');if(reset)root.innerHTML='<div class="m-empty">Could not load your gallery. Please try again.</div>';
+  if(more)more.hidden=false;
+ }finally{galleryLoading=false;if(more){more.disabled=false;more.textContent='Load more photos ↓';}}
+}
 async function loadPayments(){
  const root=$('membershipPayments');if(!root)return;
  const data=await request('payments');root.replaceChildren();
@@ -151,8 +180,9 @@ function pickFiles(files){let rejected=0;for(const file of files){if(!mimeOk(fil
 async function uploadAll(){if(uploadBusy)return;
  if(!uploadFiles.length)return msg('Choose at least one image.',true);
  if(!await signedInOrPrompt(uploadAll))return;
- if(!entitlement?.active||entitlement.remaining<1)return msg('Start your ₹499 monthly plan first.',true);
- if(uploadFiles.length>entitlement.remaining)return msg(`You have ${entitlement.remaining} uploads remaining. Upload fewer photos or add more after using your current allowance.`,true);
+ if(!entitlement?.active){try{await refreshEntitlement()}catch(e){return msg(e.message,true)}}
+ if(!entitlement?.active)return msg('Start your ₹499 monthly plan first.',true);
+ if(!entitlement.freeAccess&&uploadFiles.length>entitlement.remaining)return msg(`You have ${entitlement.remaining} uploads remaining. Upload fewer photos or add more after using your current allowance.`,true);
  uploadBusy=true;$('sendUploads').disabled=true;let done=0;const total=uploadFiles.length;const progress=$('uploadProgress');progress.hidden=false;
  try{
   const batch=crypto.randomUUID();let errors=[];
@@ -224,6 +254,7 @@ async function aiSend(){const button=$('aiSend'),input=$('aiPrompt'),typed=input
  const message=typed||(aiFiles.length?(mode==='image'?'Create a professional product image using my attached photos.':'Please review my attached photos.'):'');
  if(!message)return msg('Write a message or attach a photo.',true,'aiMessage');
  if(!await signedInOrPrompt(aiSend))return;
+ if(!entitlement?.active){try{await refreshEntitlement()}catch(e){return msg(e.message,true,'aiMessage')}}
  if(!entitlement?.active)return msg('Start the monthly plan to use AI Studio.',true,'aiMessage');
  button.disabled=true;button.setAttribute('aria-busy','true');aiLine('user',message);input.value='';aiLine('assistant','');const waiting=$('aiThread').lastChild;waiting.querySelector('div').innerHTML='<span class="m-dots" aria-label="AI is working"><i></i><i></i><i></i></span>';
  try{const images=await Promise.all(aiFiles.map(fileToJpeg));const history=aiMessages.slice(-8);const ans=await post('ai',{message,mode,images,history});waiting.remove();aiLine('assistant',ans.reply,ans.imageId);
@@ -238,16 +269,19 @@ async function boot(){
  await getAuth();updateProfileAuth();
  if(!authUser){
   customer=null;entitlement=null;renderPlan();
-  if(page==='profile')openAuth();
+  if(page==='profile'||page==='gallery')openAuth();
   return;
  }
  try{
   await initSession();
-  if(page==='create')await loadUploads()
+  if(page==='create')await loadUploads();
+  if(page==='gallery')await loadCustomerGallery(true)
   if(page==='profile')await loadUploads();
   if(page==='payments')await loadPayments();
  }catch(e){msg(e.message,true,page==='topup'?'paymentMessage':page==='profile'?'profileStatus':'uploadMessage')}
 }
+if($('galleryMore'))$('galleryMore').onclick=()=>loadCustomerGallery(false);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&authUser&&['create','ai','profile','topup'].includes(page))refreshEntitlement().catch(()=>{});});
 if($('manualImages'))$('manualImages').addEventListener('change',ev=>{pickFiles([...ev.target.files]);ev.target.value=''});
 if($('photoDrop')){const label=$('photoDrop');label.addEventListener('dragover',e=>{e.preventDefault();label.classList.add('is-dragging')});label.addEventListener('dragleave',()=>label.classList.remove('is-dragging'));label.addEventListener('drop',e=>{e.preventDefault();label.classList.remove('is-dragging');pickFiles([...e.dataTransfer.files])})}
 if($('sendUploads'))$('sendUploads').onclick=uploadAll;
