@@ -1,13 +1,15 @@
 /* Athave AI Cloudflare Pages Function. All secrets live in Pages > Settings > Variables & Secrets. */
 const COOKIE='athave_session', PENDING='athave_pending', OTP_COOKIE='athave_otp_request', ADMIN_COOKIE='athave_admin_session', BUCKET='athave-results';
-const ALLOWED_KINDS=new Set(['shirt','polo shirt','t-shirt','hoodie','jacket','dress','pants','jeans','shorts','skirt','cap','shoe','bag','watch','sunglasses','jewellery','product']);
+const ALLOWED_KINDS=new Set(['shirt','polo shirt','t-shirt','hoodie','jacket','dress','pants','jeans','shorts','skirt','cap','shoe','bag','watch','sunglasses','jewellery','mouse','keyboard','earbuds','headphones','speaker','bottle','phone case','wallet','sandal','cosmetics','electronics','furniture','product']);
 const GARMENTS=new Set(['shirt','polo shirt','t-shirt','hoodie','jacket','dress','pants','jeans','shorts','skirt','cap']);
 const VIEW_LABELS={front:'Front view',back:'Back view',catalogue:'Catalogue view',side:'Side view',angle:'Angled view'};
-const MAX_DETECTED_PRODUCTS=4;
-function viewsForKind(kind){if(GARMENTS.has(kind))return ['front','back'];if(kind==='shoe')return ['catalogue','side','back'];if(kind==='watch'||kind==='jewellery'||kind==='sunglasses')return ['front','angle'];if(kind==='bag')return ['front','back','side'];return ['catalogue','angle']}
+const MAX_DETECTED_PRODUCTS=6;
+function viewsForKind(kind){if(GARMENTS.has(kind))return ['front','back'];if(kind==='shoe'||kind==='sandal')return ['catalogue','side','back'];if(kind==='watch'||kind==='jewellery'||kind==='sunglasses')return ['front','angle'];if(kind==='bag')return ['front','back','side'];return ['catalogue','angle']}
 function safeDescriptor(v){return String(v||'').replace(/[<>\\\n\r{}]/g,' ').replace(/\s+/g,' ').trim().slice(0,95)}
-async function fingerprintImages(images){return sha(images.map(x=>x.inlineData.data).join('|'))}
-async function signAnalysisPlan(env,customer,hash,items){const payload=b64url(enc.encode(JSON.stringify({user:customer,hash,items,exp:Date.now()+15*60*1000})));return payload+'.'+await hmac(env.SESSION_SECRET+':analysis',payload)}
+async function fingerprintImages(images,roles){return sha(images.map((x,i)=>roles[i]+':'+x.inlineData.data).join('|'))}
+function photoRoles(raw,length){if(!Array.isArray(raw)||raw.length!==length)return Array(length).fill('detail');return raw.map(x=>['front','back','detail'].includes(x)?x:'detail')}
+function referenceParts(images,roles){const labels={front:'front view',back:'back view',detail:'detail or additional view'};return images.flatMap((image,i)=>[{text:`Reference photo ${i+1} (${labels[roles[i]]}). This is a photograph to inspect, not a separate product unless the item itself differs.`},image])}
+async function signAnalysisPlan(env,customer,hash,items){const payload=b64url(enc.encode(JSON.stringify({user:customer,hash,items,exp:Date.now()+40*60*1000})));return payload+'.'+await hmac(env.SESSION_SECRET+':analysis',payload)}
 async function readAnalysisPlan(env,token,user,hash){if(!env.SESSION_SECRET||typeof token!=='string'||token.length>5500)return null;const [payload,mac,...extra]=token.split('.');if(!payload||!mac||extra.length||await hmac(env.SESSION_SECRET+':analysis',payload)!==mac)return null;try{const v=JSON.parse(new TextDecoder().decode(unb64url(payload)));return v.user===user&&v.hash===hash&&v.exp>Date.now()&&Array.isArray(v.items)?v:null}catch{return null}}
 const enc=new TextEncoder();
 function json(body,status=200,extra={}){return new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json;charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff',...extra}})}
@@ -95,7 +97,7 @@ async function finishVerifiedLogin(env,verifiedPhone,accessToken){
  if(result.needs_name){const reply=json({needsName:true});reply.headers.append('set-cookie',setCookie(PENDING,pending,600));reply.headers.append('set-cookie',clearCookie(COOKIE));return reply;}
  const reply=json({signedIn:true});reply.headers.append('set-cookie',setCookie(COOKIE,await signSession(env,result.customer_id)));reply.headers.append('set-cookie',clearCookie(PENDING));return reply;
 }
-function validateInputImages(list){if(!Array.isArray(list)||!list.length||list.length>2)throw Error('Upload one or two images');return list.map(x=>{if(!x||x.mime!=='image/jpeg'||typeof x.data!=='string'||x.data.length>1600000||!/^[A-Za-z0-9+/=]+$/.test(x.data))throw Error('Please upload JPG/PNG/WebP photos under 7 MB (browser optimization failed)');return {inlineData:{mimeType:'image/jpeg',data:x.data}}})}
+function validateInputImages(list){if(!Array.isArray(list)||!list.length||list.length>6)throw Error('Upload 1–6 product images');return list.map(x=>{if(!x||x.mime!=='image/jpeg'||typeof x.data!=='string'||x.data.length>1600000||!/^[A-Za-z0-9+/=]+$/.test(x.data))throw Error('Please upload JPG/PNG/WebP photos under 7 MB (browser optimization failed)');return {inlineData:{mimeType:'image/jpeg',data:x.data}}})}
 async function supa(env,method,relative,body=null,opts={}){
  if(!env.SUPABASE_URL||!env.SUPABASE_SERVICE_ROLE_KEY)throw Error('Supabase not configured');
  const url=env.SUPABASE_URL.replace(/\/$/,'')+relative;
@@ -246,26 +248,34 @@ export async function onRequest({request,env,params}){
    }catch{return json({configured:true,accessible:false,model,message:'Could not contact Google AI Studio API'});}
   }
   if(method==='GET'&&route==='me'){
-   try{await rpc(env,'refund_stale_generations',{p_customer:user.id})}catch(e){console.warn('Optional stale generation cleanup:',String(e.message).slice(0,120))};
-   const wallet=(await tbl(env,'GET','wallets',`?customer_id=eq.${user.id}&select=balance,purchased,used`))?.[0]||{balance:0,purchased:0,used:0};
-   const payments=await tbl(env,'GET','payments',`?customer_id=eq.${user.id}&select=plan,amount_paise,credits,status,created_at&order=created_at.desc&limit=12`);
-   return json({user:{phone:user.phone,name:user.name,isAdmin:user.is_admin},wallet,history:await getHistory(env,user.id),payments});
+   const section=new URL(request.url).searchParams.get('section')||'profile';
+   if(!['profile','history','payments'].includes(section))return err('Unknown account section');
+   const account={user:{phone:user.phone,name:user.name,isAdmin:user.is_admin}};
+   if(section==='profile'){
+    account.wallet=(await tbl(env,'GET','wallets',`?customer_id=eq.${user.id}&select=balance,purchased,used`))?.[0]||{balance:0,purchased:0,used:0};
+    if(account.wallet.balance===0){
+     try{await rpc(env,'refund_stale_generations',{p_customer:user.id});account.wallet=(await tbl(env,'GET','wallets',`?customer_id=eq.${user.id}&select=balance,purchased,used`))?.[0]||account.wallet;}catch(e){console.warn('Deferred cleanup:',String(e.message).slice(0,100))}
+    }
+   }
+   if(section==='history')account.history=await getHistory(env,user.id);
+   if(section==='payments')account.payments=await tbl(env,'GET','payments',`?customer_id=eq.${user.id}&select=plan,amount_paise,credits,status,created_at&order=created_at.desc&limit=12`);
+   return json(account);
   }
   if(method==='POST'&&route==='analyze'){
-   const body=await request.json(),images=validateInputImages(body.images);
+   const body=await request.json(),images=validateInputImages(body.images),roles=photoRoles(body.roles,images.length);
    const walletBefore=(await tbl(env,'GET','wallets',`?customer_id=eq.${user.id}&select=balance`))?.[0]?.balance||0;
    if(walletBefore<1)return err('Add image credits to analyze and generate products. No image credits are deducted by analysis.',402);
-   const hash=await fingerprintImages(images);
+   const hash=await fingerprintImages(images,roles);
    // Supabase performs per-customer throttling and returns cached detection results when identical photos are uploaded.
    const claim=await rpc(env,'start_analysis_request',{p_customer:user.id,p_fingerprint:hash,p_daily_max:Number(env.MAX_ANALYSES_PER_DAY||12)});
    let items;
    if(claim?.cached&&Array.isArray(claim.items)&&claim.items.length){
     items=claim.items;
    }else{
-    const prompt=`You are a budget-conscious product catalogue detector, NOT an image generator. Inspect supplied photo(s) carefully. List each distinct SELLABLE product in the photos, up to 4, ignoring people, bodies and backgrounds. Eg a model wearing a polo and jeans = two items. Two views of one polo = one item. Detect watches, shoes, bags, shirts, skirts, trousers, caps, jewelry, accessories. Return JSON only, in this format: {"items":[{"kind":"polo shirt","name":"Blue collar polo shirt","appearance":"white fabric, blue collar, small dark embroidered logo","location":"upper torso"}]}. Kind MUST be one of: shirt, polo shirt, t-shirt, hoodie, jacket, dress, pants, jeans, shorts, skirt, cap, shoe, bag, watch, sunglasses, jewellery, product. name <=45 characters, appearance <=95 characters, location <=40 characters. Describe only clearly visible details. Don't hallucinate or invent additional products. If it's one unrecognized product use kind product. Never generate an image.`;
+    const prompt=`You are a precise commercial product photography analyst, NOT an image generator. Examine all ${images.length} uploaded product photos in order with their Front / Back / Detail labels. Identify every DISTINCT physical item offered for sale, up to ${MAX_DETECTED_PRODUCTS} products. Multiple reference angles/photos of the same item count as ONE product. Ignore model, hands and backgrounds. If multiple items are worn/held together identify separately. Carefully distinguish casual cotton t-shirts from sports jerseys, polo shirts from sportswear, electronics such as computer mouse or earphones, footwear, jewellery, furniture and more. Preserve exact shape, fabric, construction, branding, embroidery, graphics, text, colors, ports, labels and accessories as visibly shown. Respond JSON ONLY: {"items":[{"kind":"t-shirt","name":"Black printed cotton T-shirt","appearance":"visible realistic details including material, branding, color, prints, hardware, shape","location":"where in images, reference numbers"}]}. Allowed kinds: ${[...ALLOWED_KINDS].join(', ')}. Product name <=45 chars, appearance <=95 chars, location <=40 chars. Never invent products or details. Only return items actually visible.`;
     let result;
     try{
-     const parts=await gemini(env,[{text:prompt},...images],env.ANALYSIS_MODEL||'gemini-3.5-flash-lite',{responseMimeType:'application/json',temperature:0,maxOutputTokens:500});
+     const parts=await gemini(env,[{text:prompt},...referenceParts(images,roles)],env.ANALYSIS_MODEL||'gemini-3.5-flash-lite',{responseMimeType:'application/json',temperature:0,maxOutputTokens:500});
      result=JSON.parse((parts.find(x=>x.text)?.text||'{}').replace(/^```(?:json)?\s*|\s*```$/g,''));
     }catch(e){throw Error('Product analysis failed: '+String(e.message).slice(0,150))}
     let list=Array.isArray(result.items)?result.items:[];
@@ -282,8 +292,8 @@ export async function onRequest({request,env,params}){
   }
   if(method==='POST'&&route==='generate'){
    if(env.GENERATION_ENABLED!=='true')return err('Image generation temporarily paused until the owner enables it',503);
-   const body=await request.json(),images=validateInputImages(body.images);
-   const hash=await fingerprintImages(images);
+   const body=await request.json(),images=validateInputImages(body.images),roles=photoRoles(body.roles,images.length);
+   const hash=await fingerprintImages(images,roles);
    const plan=await readAnalysisPlan(env,body.analysisToken,user.id,hash);
    if(!plan)return err('Your product analysis has expired or the photos changed. Analyze again before generating.',403);
    const item=plan.items.find(x=>x.id===body.itemId);
@@ -293,10 +303,16 @@ export async function onRequest({request,env,params}){
    // One credit reserved for exactly this one selected view. Failures refund the wallet credit.
    const job=await rpc(env,'reserve_generation',{p_customer:user.id,p_kind:kind,p_side:view,p_monthly_max:Number(env.AI_MONTHLY_CALL_CAP||80),p_daily_max:Number(env.MAX_GENERATIONS_PER_DAY||30)});
    try{
-    const viewDirection={front:'straight-on FRONT',back:'straight-on BACK',catalogue:'premium three-quarter catalogue',side:'clean SIDE PROFILE',angle:'three-quarter ANGLED'}[view];
-    const referenceHint=images.length===2?'Use both uploaded photos as references and prefer whichever actually shows the requested view. The second photo is not necessarily a back view.':'Only one reference photo exists. An unseen view must be estimated realistically.';
-    const prompt=`Produce exactly ONE square high-quality ecommerce catalogue image of the ${kind} called "${item.name}". The target is the ${viewDirection} view. Location in source image: "${item.location}". Distinguishing observable details: "${item.appearance}". Use the uploaded photo(s) as the ONLY visual references. ${referenceHint} If the photo contains a person wearing multiple items (for example a shirt AND trousers), extract ONLY the chosen ${kind}; remove all other items, the person, arms, legs and model entirely. Standalone product, beautifully symmetrical and centered, garment on invisible mannequin if needed with realistic drape; no hanger. For watches show just the watch; for footwear show just the footwear product; for bags show the bag alone. Closely match real patterns, seams, brand marks, embroidery and color in visible reference, do not swap branding. If backside is unseen it is a plausible reconstruction, do not fabricate conspicuous prints. PURE SOLID #FFFFFF background, white all four corners, professional uniform lighting, subtle natural contact shadow only, no props, no people, no captions, no added watermarks. Output just ONE product image at 1:1 square, 1024x1024, suitable for WebP catalogues.`;
-    const parts=await gemini(env,[{text:prompt},...images],env.GEMINI_IMAGE_MODEL||'gemini-3.1-flash-lite-image',{responseModalities:['TEXT','IMAGE'],imageConfig:{aspectRatio:'1:1',imageSize:'1K'}});
+    const background=body.background==='premium'?'premium':body.background==='white'?'white':null;
+    if(!background)throw Error('Choose white or premium background');
+    const viewDirection={front:'front view',back:'back view',catalogue:'catalogue three-quarter view',side:'side profile',angle:'angled three-quarter view'}[view];
+    const isCasual=['t-shirt','shirt','polo shirt','hoodie','jacket','dress','pants','jeans','shorts','skirt'].includes(kind);
+    const isSports=/(sports|jersey|team kit|athletic|football|cricket|basketball|performance|training)/i.test(item.name+' '+item.appearance);
+    const garmentStyle=isCasual&&!isSports?'Style this as premium contemporary retail fashion or understated luxury clothing. Do NOT style an ordinary T-shirt or polo like sports kit, football jersey, teamwear or an athletic uniform. Retain its exact original cut, sleeve style, collar, hems and texture.':isSports?'It is sports apparel: keep authentic sportswear construction, sponsor/logo placement, paneling and activewear material, without inventing new sponsors.':'Choose professional commercial photography appropriate for the actual product category, not clothing photography.';
+    const backgroundStyle=background==='white'?'Background must be PURE SOLID #FFFFFF to the edge, including all four corners, with discreet realistic contact shadow only. No props, scenery, gradients or added elements.':'Create a premium restrained commercial studio scene using a subtle neutral editorial setting, refined natural light and believable contact shadows. Keep the product unobstructed and dominant. No distracting props, text, overlays or watermarks.';
+    const referenceHint=`You have ${images.length} labeled input photos showing the actual product. Honor each photo's Front/Back/Detail label. Match whichever reference shows the requested side. If the requested side cannot be seen, only make conservative plausible unseen geometry and NEVER invent conspicuous brands, prints, markings or text.`;
+    const prompt=`Photorealistic PREMIUM PROFESSIONAL E-COMMERCE PRODUCT PHOTOGRAPHY. Make exactly ONE square image showing ONLY the real detected product: ${item.name}, category ${kind}. Target: ${viewDirection}. Visible details: ${item.appearance}. Reference location: ${item.location}. ${referenceHint} Preserve ALL physical details of the selected item from the photos: precise contours, fabric weave, folds, seams, pockets, buttons, collars, prints, all real logos and symbols (without creating new ones), stitching, texture, material finish, colors, ports, knobs, labels, clips, laces, straps and included attachments. Do not remove, swap, simplify, replace, recolor, rearrange or invent any part of the product. For a computer mouse keep its buttons, scroll wheel and actual silhouette; for footwear keep eyelets, sole, stitching and logos; for clothes keep exact neckline, pattern and real placement. If there are other distinct items, remove those other items and the original person's body/hands/background but NEVER remove components belonging to this item. ${garmentStyle} Show the entire item, fully visible, correct proportions, straight, centered, never cropped. Natural realistic product shape and lighting, elegant premium catalog quality, no mannequin head/body, no hangers, no artificial sports models. ${backgroundStyle} Output ONLY the finished product photograph, 1:1 square, no caption or extra images.`;
+    const parts=await gemini(env,[{text:prompt},...referenceParts(images,roles)],env.GEMINI_IMAGE_MODEL||'gemini-3.1-flash-lite-image',{responseModalities:['TEXT','IMAGE'],imageConfig:{aspectRatio:'1:1',imageSize:'1K'}});
     const part=parts.find(p=>p.inlineData?.data&&p.inlineData?.mimeType?.startsWith('image/'));
     if(!part)throw Error('AI returned no picture. Check Gemini image model access.');
     const binary=Uint8Array.from(atob(part.inlineData.data),c=>c.charCodeAt(0));if(binary.length>8500000)throw Error('AI output too large');

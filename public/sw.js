@@ -1,6 +1,6 @@
-/* Athave AI V13 cache refresh: public static files only.
+/* Athave AI V14 cache refresh: public static files only.
    Never cache API results, authenticated pages, sessions, uploads or payment data. */
-const CACHE = 'athave-static-v13-ui-20261012';
+const CACHE = 'athave-static-v14-ui-20261012';
 const STATIC = [
   '/offline.html', '/favicon.png', '/favicon-48.png', '/favicon.ico',
   '/styles.css', '/app.js', '/admin.js', '/pwa.js', '/manifest.webmanifest',

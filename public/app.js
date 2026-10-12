@@ -3,7 +3,9 @@ const $ = id => document.getElementById(id);
 const page = document.body.dataset.page;
 let config = null, me = null, lastAuthError = null, verifying = false, generating = false;
 let currentPhone = '', activePayment = null;
-let selected = { front: null, back: null };
+let selected = [];
+const MAX_PHOTOS=6;
+let loadingStarted=0;
 let analysisPlan=null, analyzedImages=null;
 const chosenOutputs=new Set();
 const MAX_SELECTABLE_OUTPUTS=8;
@@ -26,7 +28,10 @@ function authStatus(msg, error = false) {
 async function api(route, options = {}) {
  const response = await fetch('/api/' + route, { credentials:'same-origin', cache:'no-store', ...options });
  const json = await response.json().catch(() => ({}));
- if (!response.ok) { const ex = new Error(json.error || 'Request failed (HTTP ' + response.status + ')'); ex.status = response.status; throw ex; }
+ if (!response.ok) {
+  if(response.status===401 && !route.startsWith('auth/'))clearAccount();
+  const ex = new Error(json.error || 'Request failed (HTTP ' + response.status + ')'); ex.status = response.status; throw ex;
+ }
  return json;
 }
 function post(route, value) { return api(route, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(value) }); }
@@ -63,42 +68,80 @@ if ($('backBtn')) $('backBtn').onclick=()=>{
  const fallback = page==='history'||page==='payments' ? '/profile/' : '/';
  location.href=fallback;
 };
-async function refresh({ required = false, quiet = false } = {}) {
- try { me = await api('me'); lastAuthError = null; renderUser(); return me; }
- catch (e) {
-  lastAuthError = e;
-  if (e.status === 401) { me = null; renderUser(); if (required) throw e; return null; }
-  if (!quiet) pageStatus('Could not load your account: ' + e.message, true);
-  if (required) throw e;
-  return me;
- }
+// Authentication stays in an HttpOnly cookie. A short-lived, per-tab display cache
+// removes redundant DB calls when navigating back to the profile; never store OTPs/tokens.
+const ACCOUNT_KEY='athave_account_v3', ACCOUNT_TTL=180000;
+let sectionLoaded={}; let accountRequest=null;
+function sectionForPage(){return page==='history'?'history':page==='payments'?'payments':'profile'}
+function saveAccount(){try{sessionStorage.setItem(ACCOUNT_KEY,JSON.stringify({me,sectionLoaded}))}catch{}}
+function restoreAccount(){
+ try{
+  const obj=JSON.parse(sessionStorage.getItem(ACCOUNT_KEY)||'null');
+  if(obj?.me?.user && obj.sectionLoaded && Object.values(obj.sectionLoaded).some(t=>Date.now()-t<ACCOUNT_TTL)){
+   me=obj.me;sectionLoaded=obj.sectionLoaded;renderUser();return true;
+  }
+ }catch{}return false;
 }
-function renderUser() {
- if($('profileName')) $('profileName').textContent=me?.user?.name||'Your account';
- if($('profilePhone')) $('profilePhone').textContent=me?.user?.phone ? '+'+me.user.phone : 'Log in to view your number';
- if($('walletRemaining')) $('walletRemaining').textContent=me?.wallet?.balance ?? '—';
- if($('walletPurchased')) $('walletPurchased').textContent=me?.wallet?.purchased ?? '—';
- if($('walletUsed')) $('walletUsed').textContent=me?.wallet?.used ?? '—';
- if($('uploadWallet')) $('uploadWallet').textContent=me?.wallet?.balance ?? 'Sign in';
- if($('progressFill')) $('progressFill').style.width=me?.wallet?.purchased ? Math.min(100,100*me.wallet.used/me.wallet.purchased)+'%' : '0%';
+function clearAccount(){me=null;sectionLoaded={};try{sessionStorage.removeItem(ACCOUNT_KEY)}catch{}renderUser()}
+function invalidateSection(section){sectionLoaded[section]=0;saveAccount()}
+async function refresh({required=false,quiet=false,force=false,section=sectionForPage()}={}){
+ if(!force && me?.user && Date.now()-(sectionLoaded[section]||0)<ACCOUNT_TTL){renderUser();return me;}
+ if(accountRequest && !force)return accountRequest;
+ const run=(async()=>{
+  try{
+   const fresh=await api('me?section='+encodeURIComponent(section));
+   me={...(me||{}),...fresh};sectionLoaded[section]=Date.now();lastAuthError=null;
+   saveAccount();renderUser();return me;
+  }catch(e){
+   lastAuthError=e;
+   if(e.status===401){clearAccount();if(required)throw e;return null}
+   if(!quiet)pageStatus('Could not load your account: '+e.message,true);
+   if(required)throw e;
+   return me;
+  }
+ })();
+ accountRequest=run;
+ try{return await run}finally{if(accountRequest===run)accountRequest=null}
+}
+function renderUser(){
+ const signed=!!me?.user;
+ if($('profileName'))$('profileName').textContent=me?.user?.name||'Your account';
+ if($('profilePhone'))$('profilePhone').textContent=me?.user?.phone?'+'+me.user.phone:'Sign in with your phone number';
+ if($('profileVerified')){
+  $('profileVerified').textContent=signed?'Verified':'Sign in';
+  $('profileVerified').setAttribute('aria-label',signed?'Verified account':'Sign in');
+  $('profileVerified').setAttribute('aria-disabled',String(signed));
+ }
+ if($('signActionLabel'))$('signActionLabel').textContent=signed?'Log out':'Log in';
+ if($('signOut'))$('signOut').setAttribute('aria-label',signed?'Log out':'Log in');
+ if($('walletRemaining'))$('walletRemaining').textContent=me?.wallet?.balance??'—';
+ if($('walletPurchased'))$('walletPurchased').textContent=me?.wallet?.purchased??'—';
+ if($('walletUsed'))$('walletUsed').textContent=me?.wallet?.used??'—';
+ if($('uploadWallet'))$('uploadWallet').textContent=me?.wallet?.balance??'Sign in';
+ if($('progressFill'))$('progressFill').style.width=me?.wallet?.purchased?Math.min(100,100*me.wallet.used/me.wallet.purchased)+'%':'0%';
  for(const badge of document.querySelectorAll('.header-admin-badge'))show(badge,!!me?.user?.isAdmin);
- 
- 
- if(page==='history') renderHistory();
- if(page==='payments') renderPayments();
+ if(page==='history')renderHistory();
+ if(page==='payments')renderPayments();
 }
-async function ensureLogin(next) {
- try { await refresh({required:true,quiet:true}); }
- catch(e) {
-  if (e.status === 401) { openLogin(next); return false; }
-  pageStatus('Account service error: ' + e.message, true); return false;
- }
- return true;
+if($('profileVerified'))$('profileVerified').addEventListener('click',e=>{e.preventDefault();if(!me?.user)openLogin()});
+if($('redeemToggle'))$('redeemToggle').onclick=()=>{
+ const panel=$('redeemPanel'),button=$('redeemToggle');
+ if(!panel)return;
+ panel.hidden=!panel.hidden;button.setAttribute('aria-expanded',String(!panel.hidden));
+ if(!panel.hidden)$('redeemInput')?.focus();
+};
+window.addEventListener('storage',e=>{if(e.key==='athave_auth_changed')clearAccount()});
+async function ensureLogin(next){
+ if(me?.user&&Date.now()-(sectionLoaded.profile||0)<ACCOUNT_TTL)return true;
+ try {await refresh({required:true,quiet:true,section:'profile'});if(me?.user)return true;openLogin(next);return false}
+ catch(e){if(e.status===401){openLogin(next);return false}pageStatus('Account unavailable: '+e.message,true);return false}
 }
 async function loginSuccess() {
  try {
-  await refresh({required:true,quiet:true});
+  clearAccount();
+  await refresh({required:true,quiet:true,force:true,section:sectionForPage()});
   if (!me) throw new Error('Your account could not be loaded yet.');
+  try{localStorage.setItem('athave_auth_changed',String(Date.now()))}catch{}
   closeLogin(false);
   authStatus('');
   $('otp').value=''; $('name').value='';
@@ -140,35 +183,73 @@ $('retryOtp').onclick=async()=>{
  try{await post('auth/send-otp',{phone:currentPhone});authStatus('A fresh OTP was sent.')}catch(e){authStatus(e.message,true)}
 };
 $('changePhone').onclick=()=>{setAuthStep('phoneForm');$('otp').value='';authStatus('')};
-async function signOut(){try{await post('auth/logout',{});me=null;renderUser();location.href='/'}catch(e){toast(e.message,true)}}
+async function signOut(){
+ if(!me?.user){openLogin();return}
+ try{await post('auth/logout',{});clearAccount();try{localStorage.setItem('athave_auth_changed',String(Date.now()))}catch{}toast('Signed out')}
+ catch(e){toast(e.message,true)}
+}
 if($('signOut'))$('signOut').onclick=signOut;
-// Uploaded image handling: two independent slots, front required, back optional.
-function formatBytes(bytes){return bytes < 1048576 ? Math.round(bytes/1024)+' KB' : (bytes/1048576).toFixed(1)+' MB'}
-function renderPhotoSlot(side) {
- const root=$(side+'Preview'); if(!root)return;root.replaceChildren(); const file=selected[side]; root.hidden=!file;
- if(!file)return;
- const pic=document.createElement('img'), u=URL.createObjectURL(file);pic.src=u;pic.onload=()=>URL.revokeObjectURL(u);
- const text=document.createElement('div'),n=document.createElement('b'),sz=document.createElement('small');n.textContent=file.name;sz.textContent=formatBytes(file.size);text.append(n,sz);
- const remove=document.createElement('button');remove.type='button';remove.textContent='×';remove.setAttribute('aria-label','Remove photo');remove.onclick=()=>{selected[side]=null;$(side+'File').value='';renderPhotoSlot(side);invalidateAnalysis()};
- root.append(pic,text,remove);
+// Unified multiple-photo input. Each reference can be tagged Front, Back or Detail.
+function formatBytes(bytes){return bytes<1048576?Math.round(bytes/1024)+' KB':(bytes/1048576).toFixed(1)+' MB'}
+function assignPhotos(files){
+ if(!files?.length)return;
+ const accepted=[];
+ for(const file of files){
+  if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>7*1048576){toast('Use JPG, PNG or WebP under 7 MB.',true);continue}
+  if(selected.some(x=>x.file.name===file.name&&x.file.size===file.size&&x.file.lastModified===file.lastModified))continue;
+  if(selected.length+accepted.length>=MAX_PHOTOS){toast('Up to '+MAX_PHOTOS+' photos per batch.',true);break}
+  accepted.push({file,role:selected.length+accepted.length===0?'front':'detail'});
+ }
+ if(!accepted.length)return;
+ selected.push(...accepted);renderPhotoList();invalidateAnalysis();
 }
-function assignPhoto(side,file){
- if(!file)return;
- if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>7*1024*1024){pageStatus('Please select JPG, PNG or WebP under 7 MB.',true);return}
- selected[side]=file;renderPhotoSlot(side);invalidateAnalysis();pageStatus('');
+function renderPhotoList(){
+ const root=$('productPreviews');if(!root)return;root.replaceChildren();
+ selected.forEach((entry,index)=>{
+  const item=document.createElement('div');item.className='product-photo';
+  const pic=document.createElement('img');const objectUrl=URL.createObjectURL(entry.file);pic.src=objectUrl;pic.onload=()=>URL.revokeObjectURL(objectUrl);pic.alt='Reference '+(index+1);
+  const info=document.createElement('div');info.className='photo-info';
+  const title=document.createElement('b');title.textContent=entry.file.name;
+  const bytes=document.createElement('small');bytes.textContent=formatBytes(entry.file.size);
+  info.append(title,bytes);
+  const label=document.createElement('label');label.className='photo-role';label.textContent='View';
+  const select=document.createElement('select');select.setAttribute('aria-label','Photo '+(index+1)+' view');
+  for(const [value,text] of [['front','Front'],['back','Back'],['detail','Detail / Other']]){
+   const op=document.createElement('option');op.value=value;op.textContent=text;op.selected=entry.role===value;select.append(op);
+  }
+  select.onchange=()=>{entry.role=select.value;invalidateAnalysis()};label.append(select);
+  const remove=document.createElement('button');remove.type='button';remove.className='photo-remove';remove.textContent='×';remove.setAttribute('aria-label','Remove photo '+(index+1));
+  remove.onclick=()=>{selected.splice(index,1);renderPhotoList();invalidateAnalysis()};
+  item.append(pic,info,label,remove);root.append(item);
+ });
+ if($('uploadCount'))$('uploadCount').textContent=selected.length?`${selected.length} / ${MAX_PHOTOS} photos selected`:'No photos selected';
 }
-for(const side of ['front','back']) {
- const input=$(side+'File'),drop=$(side+'Drop');if(!input)continue;
- input.onchange=()=>assignPhoto(side,input.files?.[0]);
+if($('productFiles'))$('productFiles').onchange=e=>{assignPhotos([...e.target.files]);e.target.value=''};
+if($('productDrop')){
+ const drop=$('productDrop');
  drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('is-dragging')});
  drop.addEventListener('dragleave',()=>drop.classList.remove('is-dragging'));
- drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('is-dragging');assignPhoto(side,e.dataTransfer.files?.[0])});
+ drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('is-dragging');assignPhotos([...e.dataTransfer.files])});
 }
+function loader(title,message,count='',percent=0){
+ const modal=$('studioLoader');if(!modal)return;
+ modal.hidden=false;
+ $('loaderTitle').textContent=title;
+ $('loaderMessage').textContent=message;
+ $('loaderCount').textContent=count;
+ $('loaderProgress').style.width=Math.max(5,Math.min(100,percent))+'%';
+ document.body.classList.add('is-studio-busy');
+}
+function hideLoader(){show($('studioLoader'),false);document.body.classList.remove('is-studio-busy')}
+const outputBackground=()=>document.querySelector('input[name="background"]:checked')?.value||'white';
+for(const input of document.querySelectorAll('input[name="background"]'))input.addEventListener('change',()=>{
+ for(const label of document.querySelectorAll('.background-option'))label.classList.toggle('is-active',label.querySelector('input').checked);
+});
 async function encodePhoto(file){
- let bmp=await createImageBitmap(file),scale=Math.min(1,960/Math.max(bmp.width,bmp.height));
+ let bmp=await createImageBitmap(file),scale=Math.min(1,900/Math.max(bmp.width,bmp.height));
  let c=document.createElement('canvas');c.width=Math.round(bmp.width*scale);c.height=Math.round(bmp.height*scale);
  let ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);ctx.drawImage(bmp,0,0,c.width,c.height);bmp.close();
- let data=c.toDataURL('image/jpeg',.69).split(',')[1];if(data.length>1600000)throw Error('This photo is too large after optimization. Use a smaller one.');
+ let data=c.toDataURL('image/jpeg',.67).split(',')[1];if(data.length>1600000)throw Error('This photo is too large after optimization. Use a smaller one.');
  return {mime:'image/jpeg',data};
 }
 function storeResults(list){sessionStorage.setItem('athave_recent_results', JSON.stringify(list));}
@@ -176,7 +257,9 @@ function storedResults(){try{return JSON.parse(sessionStorage.getItem('athave_re
 function invalidateAnalysis(){
  analysisPlan=null;analyzedImages=null;chosenOutputs.clear();
  show($('selectionPanel'),false);
- if($('analyzeBtn')){$('analyzeBtn').disabled=false;$('analyzeBtn').textContent='Analyze my products →';show($('analyzeBtn'),true)}
+ if($('analyzeBtn')){$('analyzeBtn').disabled=false;$('analyzeBtn').textContent='Analyze photos';show($('analyzeBtn'),true)}
+ show($('selectionPanel'),false);show($('uploadStage'),true);show($('studioControls'),true);show($('studioTitle'),true);
+ if($('studioStepper')){const spans=$('studioStepper').querySelectorAll('span');if(spans.length>1){spans[0].className='active';spans[1].className=''}}
  updateSelection();
 }
 function updateSelection(){
@@ -184,7 +267,7 @@ function updateSelection(){
  if($('selectedCount'))$('selectedCount').textContent=String(total);
  if($('creditCount'))$('creditCount').textContent=String(total);
  if($('generateBtn'))$('generateBtn').disabled=!analysisPlan||!total||generating;
- if($('generateLabel'))$('generateLabel').textContent=total?`Generate ${total} selected image${total===1?'':'s'}`:'Select image views to continue';
+ if($('generateLabel'))$('generateLabel').textContent=total?`Generate ${total} image${total===1?'':'s'}`:'Choose your views';
 }
 function renderSelectionCards(){
  const root=$('detectedItems');if(!root)return;root.replaceChildren();
@@ -192,13 +275,13 @@ function renderSelectionCards(){
   const wrapper=document.createElement('div');wrapper.className='detected-item';
   const heading=document.createElement('div');heading.className='detected-heading';
   const title=document.createElement('strong');title.textContent=item.name||item.kind;
-  const subtitle=document.createElement('span');subtitle.textContent=item.appearance||'Detected from your photo';
+  const subtitle=document.createElement('span');subtitle.textContent=item.kind||'';
   heading.append(title,subtitle);wrapper.append(heading);
   const row=document.createElement('div');row.className='view-choices';
   for(const view of item.views){
    const key=item.id+'|'+view;
    const btn=document.createElement('button');btn.type='button';btn.className='view-card';btn.setAttribute('aria-pressed','false');btn.dataset.key=key;
-   const glyph=document.createElement('span');glyph.className='view-card-icon';glyph.textContent=view==='front'?'↟':view==='back'?'↡':view==='side'?'⇥':view==='angle'?'◩':'✦';
+   const glyph=document.createElement('span');glyph.className='view-card-icon';glyph.innerHTML=view==='front'?'<svg viewBox="0 0 24 24"><path d="M12 20V4m-6 6 6-6 6 6"/></svg>':view==='back'?'<svg viewBox="0 0 24 24"><path d="M12 4v16m-6-6 6 6 6-6"/></svg>':view==='side'?'<svg viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></svg>':'<svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 9h6v6"/></svg>';
    const words=document.createElement('span');words.className='view-card-label';words.textContent=analysisPlan.views?.[view]||view;
    const unit=document.createElement('small');unit.textContent='1 credit';
    btn.append(glyph,words,unit);
@@ -216,52 +299,58 @@ function renderSelectionCards(){
  updateSelection();
 }
 async function analyzePhotos(){
- if(!selected.front)return pageStatus('Upload your product image first.',true);
+ if(!selected.length)return pageStatus('Add at least one product photo.',true);
  if(!await ensureLogin(analyzePhotos))return;
  const btn=$('analyzeBtn');if(!btn)return;
  btn.disabled=true;
  try{
-  pageStatus('Preparing your photos…');
-  const images=await Promise.all([selected.front,selected.back].filter(Boolean).map(encodePhoto));
-  pageStatus('Detecting your products. No image credits are used for this step…');
-  const result=await post('analyze',{images});
-  if(!result.items?.length||!result.analysisToken)throw Error('Product detection returned no usable items.');
-  analyzedImages=images;analysisPlan=result;chosenOutputs.clear();
-  renderSelectionCards();show($('selectionPanel'),true);show(btn,false);
-  pageStatus(`${result.items.length} product${result.items.length===1?'':'s'} detected. Tap only the view cards you want.`);
+  loader('Preparing photos','Optimizing your product references…');
+  const images=await Promise.all(selected.map(x=>encodePhoto(x.file)));
+  const roles=selected.map(x=>x.role);
+  loader('Analyzing photos','Identifying products and their visible details…','',34);
+  const result=await post('analyze',{images,roles});
+  if(!result.items?.length||!result.analysisToken)throw Error('No products were identified. Try another photo.');
+  analyzedImages=images;analyzedRoles=roles;analysisPlan=result;chosenOutputs.clear();
+  renderSelectionCards();show($('selectionPanel'),true);show($('uploadStage'),false);show($('studioControls'),false);show($('studioTitle'),false);
+  if($('studioStepper')){const spans=$('studioStepper').querySelectorAll('span');if(spans.length>1){spans[0].className='done';spans[1].className='active'}}
+  if($('studioStepper')){$('studioStepper').classList.add('on-choose')}
+  pageStatus('');hideLoader();
   $('selectionPanel')?.scrollIntoView({behavior:'smooth',block:'start'});
- }catch(e){pageStatus(e.message,true)}finally{btn.disabled=false}
+ }catch(e){hideLoader();pageStatus(e.message,true)}finally{btn.disabled=false}
 }
+let analyzedRoles=null;
 async function generate(){
  if(generating||!analysisPlan||!analyzedImages)return;
  const targets=[...chosenOutputs].map(key=>{const [itemId,view]=key.split('|');const item=analysisPlan.items.find(x=>x.id===itemId);return item?{itemId,view,item}:null}).filter(Boolean);
- if(!targets.length)return pageStatus('Tap one or more view cards to select what you want.',true);
+ if(!targets.length)return pageStatus('Choose at least one image view.',true);
  if(!await ensureLogin(generate))return;
- await refresh({quiet:true});
- if((me?.wallet?.balance??0)<targets.length)return pageStatus(`You selected ${targets.length} images but only have ${me?.wallet?.balance??0} credits. Top up first.`,true);
- generating=true;const button=$('generateBtn');updateSelection();let made=[],errors=[];
+ await refresh({force:true,quiet:true,section:'profile'});
+ if((me?.wallet?.balance??0)<targets.length)return pageStatus(`Need ${targets.length} credits. You have ${me?.wallet?.balance??0}. Top up first.`,true);
+ generating=true;const background=outputBackground();updateSelection();let made=[],errors=[];
  try{
   for(let i=0;i<targets.length;i++){
    const target=targets[i],label=`${target.item.name} — ${analysisPlan.views[target.view]}`;
-   pageStatus(`Generating ${i+1} of ${targets.length}: ${label}. Only selected views are sent to the image model…`);
+   loader('Creating your images',`Generating ${target.item.name} · ${analysisPlan.views[target.view]} · ${background==='premium'?'Premium background':'White background'}`,`${i+1} of ${targets.length}`,Math.round(5+80*i/targets.length));
    try{
-    const job=await post('generate',{images:analyzedImages,analysisToken:analysisPlan.analysisToken,itemId:target.itemId,view:target.view});
+    const job=await post('generate',{images:analyzedImages,roles:analyzedRoles,analysisToken:analysisPlan.analysisToken,itemId:target.itemId,view:target.view,background});
     made.push({id:job.id,label:job.label||label,kind:job.kind,side:job.side});storeResults(made);
-   }catch(e){errors.push(`${label}: ${e.message}`);
-    // Stop after the first failed output rather than spending more API money on repeated likely configuration errors.
-    break;
-   }
+   }catch(e){errors.push(`${label}: ${e.message}`);break}
   }
-  if(made.length){storeResults(made);if(errors.length)sessionStorage.setItem('athave_generation_warning',errors.join(' · '));location.href='/results/'}
-  else if(errors.length)pageStatus(errors[0],true);
- }catch(e){pageStatus(e.message,true)}finally{generating=false;updateSelection();await refresh({quiet:true})}
+  if(made.length){
+   loader('Finishing images','Opening your generated photos…','',100);
+   invalidateSection('history');invalidateSection('profile');storeResults(made);
+   if(errors.length)sessionStorage.setItem('athave_generation_warning',errors.join(' · '));
+   location.href='/results/';return;
+  }
+  if(errors.length)pageStatus(errors[0],true);
+ }catch(e){pageStatus(e.message,true)}finally{generating=false;updateSelection();hideLoader();invalidateSection('profile');}
 }
 if($('analyzeBtn'))$('analyzeBtn').onclick=analyzePhotos;
-if($('changePhotosBtn'))$('changePhotosBtn').onclick=()=>invalidateAnalysis();
+if($('changePhotosBtn'))$('changePhotosBtn').onclick=()=>{invalidateAnalysis();analyzedImages=null;analyzedRoles=null;if($('studioStepper'))$('studioStepper').classList.remove('on-choose')};
 if($('generateBtn'))$('generateBtn').onclick=generate;
 // Images downloaded via authenticated private endpoint and browser WebP conversion.
 async function optimizedWebp(id){
- const response=await fetch('/api/images/'+id,{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw Error('Could not load generated image');
+ const response=await fetch('/api/images/'+id,{credentials:'same-origin',cache:'default'});if(!response.ok)throw Error('Could not load generated image');
  const bmp=await createImageBitmap(await response.blob());const c=document.createElement('canvas');c.width=1024;c.height=1024;
  const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,1024,1024);
  const scale=Math.min(1024/bmp.width,1024/bmp.height);const w=Math.round(bmp.width*scale),h=Math.round(bmp.height*scale);
@@ -288,7 +377,7 @@ function buildOutputCard(item){
  const btn=document.createElement('button');btn.type='button';btn.textContent='Download ↓';btn.onclick=()=>downloadSingle(item);footer.append(desc,btn);card.append(image,footer);return card;
 }
 async function populateResults(){
- let list=storedResults();if(!list.length){let user=await refresh({quiet:true});if(user){list=(user.history||[]).filter(x=>x.status==='completed').slice(0,8).map(x=>({id:x.id,label:x.kind+' — '+x.side}))}}
+ let list=storedResults();if(!list.length){let user=await refresh({quiet:true,section:'history'});if(user){list=(user.history||[]).filter(x=>x.status==='completed').slice(0,8).map(x=>({id:x.id,label:x.kind+' — '+x.side}))}}
  const root=$('resultsGrid');root.replaceChildren();if(!list.length){root.innerHTML='<div class="empty-card">No generated images yet. <a href="/create/" style="text-decoration:underline">Create your first product photo</a>.</div>';return}
  for(const item of list)root.append(buildOutputCard(item));
  const warning=sessionStorage.getItem('athave_generation_warning');if(warning){sessionStorage.removeItem('athave_generation_warning');pageStatus('Some views could not be generated: '+warning,true)}
@@ -314,13 +403,13 @@ if($('downloadAllBtn'))$('downloadAllBtn').onclick=async()=>{
 function renderHistory(){let root=$('historyList');if(!root || !me)return;root.replaceChildren();let list=me.history||[];if(!list.length){root.innerHTML='<div class="empty-card">No generated photos yet. <a href="/create/" style="text-decoration:underline">Create one</a>.</div>';return}
  for(const j of list){let row=document.createElement('div');row.className='history-row';if(j.status==='completed'){let img=document.createElement('img');img.src='/api/images/'+j.id;img.alt=j.kind+' '+j.side;img.loading='lazy';row.append(img)}let div=document.createElement('div');div.className='row-text';let name=document.createElement('strong'),date=document.createElement('small');name.textContent=j.kind+' — '+j.side;date.textContent=j.status+' · '+new Date(j.created_at).toLocaleString('en-IN');div.append(name,date);row.append(div);if(j.status==='completed'){let btn=document.createElement('button');btn.className='small-download';btn.textContent='Download ↓';btn.onclick=()=>downloadSingle({id:j.id,label:j.kind+' '+j.side});row.append(btn)}root.append(row)}
 }
-function renderPayments(){let root=$('paymentList');if(!root||!me)return;root.replaceChildren();let list=me.payments||[];if(!list.length){root.innerHTML='<div class="empty-card">No payments yet. <a href="/#pricing" style="text-decoration:underline">See pricing</a>.</div>';return}for(const p of list){let row=document.createElement('div');row.className='payment-row';const div=document.createElement('div');div.className='row-text';const a=document.createElement('strong'),b=document.createElement('small');a.textContent='₹'+(p.amount_paise/100).toFixed(0)+' · '+p.plan;b.textContent=p.status+' · '+new Date(p.created_at).toLocaleString('en-IN');div.append(a,b);row.append(div);root.append(row)}}
+function renderPayments(){let root=$('paymentList');if(!root||!me)return;root.replaceChildren();let list=me.payments||[];if(!list.length){root.innerHTML='<div class="empty-card">No payments yet. <a href="/topup/" style="text-decoration:underline">See pricing</a>.</div>';return}for(const p of list){let row=document.createElement('div');row.className='payment-row';const div=document.createElement('div');div.className='row-text';const a=document.createElement('strong'),b=document.createElement('small');a.textContent='₹'+(p.amount_paise/100).toFixed(0)+' · '+p.plan;b.textContent=p.status+' · '+new Date(p.created_at).toLocaleString('en-IN');div.append(a,b);row.append(div);root.append(row)}}
 // Razorpay Checkout: new server-side order for each charge; only captured payment adds credits.
 let paymentInProgress=false;
 async function awaitPaymentCapture(orderId){
  for(let i=0;i<7;i++){
   const checked=await api('payments/status?orderId='+encodeURIComponent(orderId));
-  if(checked.paid){await refresh({required:true});return true;}
+  if(checked.paid){invalidateSection('profile');invalidateSection('payments');await refresh({required:true,force:true,section:'profile'});return true;}
   if(i<6)await new Promise(resolve=>setTimeout(resolve,2200));
  }
  return false;
@@ -369,15 +458,28 @@ if(redeemForm)redeemForm.onsubmit=async event=>{
  event.preventDefault();const button=redeemForm.querySelector('button'); const code=$('redeemInput').value.trim().toUpperCase();
  if(!/^[A-Z0-9-]{8,40}$/.test(code)){ $('redeemStatus').textContent='Enter a valid redeem code.';return }
  button.disabled=true; $('redeemStatus').textContent='Checking your code…';
- try{const data=await post('redeem',{code});await refresh({required:true});$('redeemInput').value='';$('redeemStatus').textContent=`Success! ${data.credits} credits added to your account.`;toast(`${data.credits} image credits added.`)}
+ try{const data=await post('redeem',{code});invalidateSection('profile');await refresh({required:true,force:true,section:'profile'});$('redeemInput').value='';$('redeemStatus').textContent=`Success! ${data.credits} credits added to your account.`;toast(`${data.credits} image credits added.`)}
  catch(e){$('redeemStatus').textContent=e.message;toast(e.message,true)}finally{button.disabled=false}
 };
+if($('customAmount'))$('customAmount').addEventListener('input',()=>{
+ const amount=Number($('customAmount').value);
+ if($('customCredits'))$('customCredits').textContent=Number.isInteger(amount)&&amount>=100&&amount<=10000?String(Math.floor(amount*30/500)):'—';
+});
 async function boot(){
- try {config=await api('config');await refresh({quiet:true});
-  if(!config.login){toast('Login setup incomplete. Check Cloudflare secrets.',true)}
+ restoreAccount();
+ try{
+  try{
+   const cached=JSON.parse(sessionStorage.getItem('athave_config_v2')||'null');
+   if(cached && Date.now()-cached.t<60000 && page!=='topup')config=cached.value;
+  }catch{}
+  if(!config){config=await api('config');try{sessionStorage.setItem('athave_config_v2',JSON.stringify({t:Date.now(),value:config}))}catch{}}
+  // Public pages need no wallet/history round-trip until the visitor requests an action.
+  if(['profile','history','payments','create','topup','results'].includes(page)){
+   const section=page==='results'?'history':sectionForPage();
+   // Lazy-load history only when required; avoid large image-history requests on every profile visit.
+   if(page!=='results'||!storedResults().length)await refresh({quiet:true,section});
+  }
   if(page==='results')await populateResults();
-
-  if(['profile','history','payments'].includes(page)&&!me){if(lastAuthError?.status===401)openLogin();else if(lastAuthError)pageStatus('Could not check account: '+lastAuthError.message,true)}
- }catch(e){pageStatus('Backend configuration error: '+e.message,true)}
+ }catch(e){pageStatus('Could not load the app: '+e.message,true)}
 }
 boot();

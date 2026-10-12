@@ -347,3 +347,159 @@ body[data-page="solution"] .solutions-directory-arrow{
   body[data-page="solution"] .solutions-directory-grid{grid-template-columns:1fr;gap:11px}
   body[data-page="solution"] .solutions-directory-card{min-height:160px;padding:20px}
 }
+
+
+/* V14: calm, mobile-first customer app. Existing brand and badge colors preserved. */
+:root{--app-radius:16px}
+body[data-page="create"] .app-content,
+body[data-page="profile"] .app-content,
+body[data-page="topup"] .app-content{padding-top:38px}
+body[data-page="create"] .stepper{margin-bottom:28px}
+body[data-page="create"] .app-content h1{font-size:clamp(30px,4vw,43px);line-height:1.18;margin-bottom:22px}
+body[data-page="create"] .app-content>.overline{display:none}
+.product-upload{max-width:700px;margin:auto}
+.product-upload .drop-card{min-height:192px;padding:24px;border-radius:18px;gap:10px}
+.product-upload .drop-card.is-dragging{border-color:#12171e;background:#f2f4f7}
+.product-upload .drop-icon{width:55px;height:55px}
+.product-upload .drop-icon svg{width:25px;height:25px}
+.product-upload .drop-card strong{font-size:18px;font-weight:750}
+.product-upload .drop-card small{font-size:13px;color:#737c8a}
+.product-previews{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0 0}
+.product-photo{display:grid;grid-template-columns:66px minmax(0,1fr) auto;grid-template-rows:43px auto;gap:5px 10px;align-items:center;border:1px solid #e7eaf0;border-radius:13px;padding:10px;background:#fff;min-width:0}
+.product-photo>img{grid-row:1/3;width:66px;height:74px;border-radius:9px;object-fit:contain;background:#f6f7f9}
+.product-photo .photo-info{min-width:0;align-self:center}
+.product-photo .photo-info b{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.product-photo .photo-info small{display:block;color:#8a9099;font-size:12px}
+.product-photo .photo-role{display:flex;align-items:center;gap:8px;font-size:12px;color:#737983;min-width:0}
+.product-photo .photo-role select{max-width:158px;min-width:0;border:1px solid #dce1e8;background:#fff;border-radius:8px;padding:5px 6px;font-size:12px;color:#1e232b}
+.product-photo .photo-remove{grid-column:3;grid-row:1;align-self:start;width:26px;height:26px;border:1px solid #e1e4e8;background:#fff;border-radius:50%;font-size:18px;line-height:20px;color:#636971}
+.upload-counter{font-size:12px;text-align:center;margin:11px 0 17px;color:#858c95}
+body[data-page="create"] .generator-bottom{margin-top:6px!important;display:grid;gap:12px;max-width:700px}
+body[data-page="create"] .generator-bottom .wallet-mini{padding:0!important;min-height:34px!important}
+body[data-page="create"] .generator-bottom .btn{min-height:52px;font-size:16px;border-radius:12px}
+body[data-page="create"] .selection-panel{border:0;padding-top:0;margin-top:18px}
+body[data-page="create"] .selection-eyebrow{font-size:12px}
+body[data-page="create"] .selection-panel h2{font-size:clamp(27px,4vw,37px);margin-bottom:20px}
+.detected-heading strong{font-size:17px}
+.detected-heading>span{font-size:13px;color:#8b919b}
+.view-choices{gap:11px}
+.view-card{gap:7px;border-radius:13px;min-height:100px;padding:15px 16px}
+.view-card-icon{display:flex;align-items:center;justify-content:center;width:27px;height:27px}
+.view-card-icon svg{width:25px;height:25px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.view-card-label{font-size:15px;font-weight:740}
+.view-card small{font-size:12px}
+.background-choice{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:23px 0 14px;padding:0;border:0;min-width:0}
+.background-choice legend{font-size:16px;font-weight:750;margin-bottom:12px;float:left;width:100%}
+.background-option{min-width:0;display:flex;align-items:center;gap:12px;cursor:pointer;padding:13px;border:1px solid #e3e7ed;border-radius:13px;background:#fff}
+.background-option:hover{border-color:#a1a9b5;background:#fbfbfc}
+.background-option.is-active{border-color:#15181f;box-shadow:0 0 0 1px #15181f inset}
+.background-option input{position:absolute;opacity:0;width:1px;height:1px}
+.background-option:focus-within{outline:3px solid #94a4ba;outline-offset:2px}
+.bg-swatch{width:45px;height:45px;flex:none;border-radius:11px;display:grid;place-items:center;border:1px solid #e6e8ed}
+.bg-swatch svg{width:20px;height:20px}
+.white-bg{background:white;color:#252a30}
+.premium-bg{background:linear-gradient(125deg,#f1e9e1,#c5c0b9);color:#38322d}
+.background-option b{font-size:15px;display:block}
+.background-option small{font-size:12px;color:#838992;display:block}
+.selection-total{margin:16px 0!important}
+.selection-total strong{font-size:16px}
+#generateBtn{min-height:54px;font-size:16px;border-radius:12px}
+.studio-loader{position:fixed;z-index:110;inset:0;background:rgba(255,255,255,.96);display:grid;place-items:center;padding:20px}
+.studio-loader-box{width:min(440px,100%);padding:35px 22px;text-align:center;border:1px solid #eceef2;border-radius:20px;box-shadow:0 12px 40px rgba(13,18,26,.06);background:#fff}
+.studio-loader h2{font-size:clamp(23px,4vw,30px);margin:19px 0 8px}
+.studio-loader p{font-size:15px;color:#69717e;min-height:46px}
+.loader-dots{display:flex;justify-content:center;align-items:center;gap:8px}
+.loader-dots i{width:10px;height:10px;background:#151a21;border-radius:50%;animation:athaveDots .95s infinite ease-in-out}
+.loader-dots i:nth-child(2){animation-delay:.16s}.loader-dots i:nth-child(3){animation-delay:.32s}
+@keyframes athaveDots{0%,70%,100%{opacity:.28;transform:translateY(0)}35%{opacity:1;transform:translateY(-5px)}}
+.loader-track{height:5px;margin:18px 0 9px;background:#f0f1f3;border-radius:999px;overflow:hidden}
+.loader-track span{display:block;width:5%;height:100%;background:#20252c;border-radius:999px;transition:width .4s ease}
+.studio-loader small{font-size:13px;color:#7e8794}
+body.is-studio-busy{overflow:hidden}
+/* Compact pricing view: all three payment choices appear together at ordinary mobile heights. */
+.topup-page{width:min(1040px,calc(100% - 36px));padding-bottom:32px!important}
+.topup-heading{text-align:center;margin-bottom:19px}
+.topup-heading h1{font-size:clamp(30px,4vw,43px);margin:5px 0}
+.topup-heading p{font-size:14px}
+.topup-balance{border-radius:13px;background:#f7f8fa;padding:10px 16px;margin:0 auto 16px;display:flex;align-items:center;gap:12px;max-width:680px}
+.topup-balance span{font-size:14px;color:#727984}
+.topup-balance strong{font-size:20px}
+.topup-balance a{margin-left:auto;text-decoration:underline;font-size:13px;font-weight:650}
+.topup-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.topup-card{min-width:0;border:1px solid #e6e9ee;border-radius:16px;padding:22px;display:flex;flex-direction:column;align-items:flex-start;gap:8px;background:#fff}
+.topup-card .overline{font-size:11px;color:#7a838d}
+.topup-price{font-size:35px;font-weight:800;letter-spacing:-.045em;line-height:1.18}
+.topup-card>strong{font-size:17px;font-weight:750;margin:3px 0 15px}
+.topup-card .pay-btn{margin-top:auto;min-height:47px;border-radius:11px;font-size:14px}
+.topup-card .amount-label{font-size:12px;color:#79818b}
+.topup-card .money-input{width:100%;margin:0;padding:0 10px;height:47px;border-radius:10px;display:flex;align-items:center}
+.topup-card .money-input input{min-width:0;width:100%;font-size:19px;outline:0}
+.topup-card.custom-topup>strong{margin:3px 0}
+.topup-note{text-align:center;margin:12px 0 0;font-size:12px}
+.topup-page .page-status{text-align:center;margin-top:7px;font-size:13px}
+/* Main page retains SEO title and dedicated solution links via footer. */
+.topup-teaser{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:35px auto 68px;padding:29px 32px;border:1px solid #e6e8ec;border-radius:19px;background:#f9fafb}
+.topup-teaser h2{font-size:clamp(25px,3vw,32px);margin:6px 0}
+.topup-teaser p{font-size:14px}
+.topup-teaser .btn{font-size:14px;min-height:48px;flex:none}
+/* Profile: no permanent giant redeem panel, clear tap areas and legible text. */
+body[data-page="profile"] .profile-head{margin-top:20px}
+.profile-head .verified{text-decoration:none;white-space:nowrap;cursor:pointer}
+.profile-head .verified[aria-disabled="true"]{cursor:default}
+.profile-content .option-row{min-height:64px;padding:11px 18px}
+.profile-content .option-row b{font-size:16px}
+.profile-content .option-icon{width:42px;height:42px}
+.profile-content .option-icon svg{width:23px;height:23px}
+.profile-content .redeem-panel{margin:14px 0;padding:19px}
+.profile-content .redeem-panel h3{font-size:19px}
+.profile-content .credit-panel{margin-bottom:16px}
+.profile-content .credit-panel strong{font-size:17px}
+.profile-content .credit-numbers{margin:7px 0}
+@media(max-width:730px){
+ body[data-page="create"] .app-content,body[data-page="profile"] .app-content{padding-top:27px}
+ body[data-page="create"] .app-content h1{font-size:32px;margin-bottom:15px}
+ body[data-page="create"] .stepper{margin-bottom:26px}
+ .product-previews{grid-template-columns:1fr}
+ .product-upload .drop-card{min-height:162px;padding:17px 12px}
+ .product-photo{grid-template-columns:66px minmax(0,1fr) auto;grid-template-rows:40px 32px}
+ .background-option{padding:10px 9px;gap:8px}
+ .bg-swatch{width:34px;height:38px;border-radius:9px}
+ .background-option b{font-size:14px}
+ .background-option small{font-size:11px}
+ .topup-page{padding-top:17px!important;padding-bottom:22px!important;min-height:calc(100vh - 148px)}
+ .topup-heading{margin-bottom:12px}
+ .topup-heading h1{font-size:29px}
+ .topup-heading p{font-size:12px}
+ .topup-balance{margin-bottom:10px;padding:7px 12px}
+ .topup-grid{grid-template-columns:1fr;gap:8px}
+ .topup-card{padding:11px 13px;display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;align-items:center;gap:2px 10px;border-radius:13px}
+ .topup-card .overline{grid-column:1;grid-row:1;font-size:10px;margin:0}
+ .topup-card .topup-price{grid-column:1;grid-row:2;font-size:27px}
+ .topup-card>strong{grid-column:2;grid-row:1;font-size:14px;margin:0;text-align:right}
+ .topup-card .pay-btn{grid-column:2;grid-row:2;min-height:39px;padding:9px 13px;min-width:125px;font-size:13px}
+ .topup-card.custom-topup{grid-template-columns:1fr 1fr auto;grid-template-rows:auto auto}
+ .topup-card.custom-topup .overline{grid-column:1/3;grid-row:1}
+ .topup-card.custom-topup .amount-label{display:none}
+ .topup-card.custom-topup .money-input{grid-column:1;grid-row:2;height:39px}
+ .topup-card.custom-topup>strong{grid-column:2;grid-row:2;text-align:center}
+ .topup-card.custom-topup .pay-btn{grid-column:3;grid-row:2;min-width:74px}
+ .topup-note{font-size:11px;margin-top:9px}
+ .topup-teaser{padding:19px;display:grid;margin-bottom:40px}
+ .topup-teaser .btn{width:100%}
+ .profile-content .option-row{padding:10px 13px;min-height:62px}
+}
+@media(max-width:390px){
+ .topup-card.custom-topup{grid-template-columns:1.15fr .8fr auto}
+ .topup-card.custom-topup .money-input{padding:0 5px}
+ .topup-card.custom-topup .money-input input{font-size:15px}
+ .topup-card.custom-topup>strong{font-size:12px}
+ .topup-card.custom-topup .pay-btn{font-size:12px;min-width:60px;padding:8px}
+ .topup-balance{font-size:12px;gap:6px}
+}
+@media(prefers-reduced-motion:reduce){.loader-dots i{animation:none}}
+
+/* Fieldset legend is outside grid layout in Chromium; keep both backgrounds aligned. */
+.background-choice{display:flex;flex-wrap:wrap;align-items:stretch;column-gap:10px;row-gap:10px}
+.background-choice legend{display:block;float:none;width:100%;padding:0;margin-bottom:12px}
+.background-choice>.background-option{flex:1 1 calc(50% - 10px);max-width:calc(50% - 5px)}
+@media(max-width:420px){.background-choice>.background-option{padding:10px 8px;gap:7px}}
