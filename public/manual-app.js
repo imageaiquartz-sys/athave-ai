@@ -75,11 +75,11 @@ function updateProfileAuth(){
 async function showHero(){
  const root=$('homepageArt');if(!root)return;
  const pic=$('homepageImage');
- root.classList.add('m-transparent-image');
- root.classList.remove('m-with-background');
- pic.src='/assets/athave-white-sneakers.webp';
- pic.alt='Athave AI branded white sneakers shown on a luxury showcase background';
- const cap=$('homepageCaption'); if(cap) cap.textContent='LUXURY PRODUCT VISUALS';
+ root.classList.add('m-luxury-hero-image');
+ root.classList.remove('m-with-background','m-transparent-image');
+ pic.src='/assets/athave-luxury-hero.webp';
+ pic.alt='Athave AI luxury perfume and black earbuds product collection on polished marble';
+ const cap=$('homepageCaption'); if(cap) cap.remove();
 }
 async function loadGallery(){
  const refs={1:'/assets/athave-white-sneakers.webp',2:'/assets/athave-shirt.webp',3:'/assets/athave-earbuds-cutout.webp'};
@@ -189,14 +189,46 @@ function aiLine(role,content,imageId){const holder=$('aiThread');if(!holder)retu
  if(role==='assistant'){const avatar=document.createElement('span');avatar.className='m-ai-avatar';avatar.textContent='✦';row.append(avatar)}
  const div=document.createElement('div');div.textContent=content;if(imageId){const img=document.createElement('img');img.src=API+'ai/file?id='+encodeURIComponent(imageId);img.alt='AI generated image';const a=document.createElement('a');a.href=img.src;a.textContent='Download image ↓';div.append(img,a)}row.append(div);holder.append(row);holder.scrollTop=holder.scrollHeight;
 }
-function showAiAttachments(){const root=$('aiAttached');root.replaceChildren();for(const file of aiFiles){const img=document.createElement('img');const url=URL.createObjectURL(file);img.src=url;img.alt=file.name;img.onload=()=>URL.revokeObjectURL(url);root.append(img)}}
-async function aiSend(){const button=$('aiSend'),input=$('aiPrompt'),message=input.value.trim();if(!message)return msg('Enter a question or image request.',true,'aiMessage');
+function showAiAttachments(){
+ const root=$('aiAttached');if(!root)return;
+ root.replaceChildren();
+ for(const [index,file] of aiFiles.entries()){
+  const tile=document.createElement('div');tile.className='m-ai-preview';
+  const image=document.createElement('img');const url=URL.createObjectURL(file);
+  image.src=url;image.alt='Attached photo '+(index+1)+': '+file.name;
+  image.addEventListener('load',()=>URL.revokeObjectURL(url),{once:true});
+  image.addEventListener('error',()=>URL.revokeObjectURL(url),{once:true});
+  const remove=document.createElement('button');remove.type='button';remove.className='m-ai-preview-remove';
+  remove.setAttribute('aria-label','Remove '+file.name);remove.textContent='×';
+  remove.onclick=()=>{aiFiles.splice(index,1);showAiAttachments()};
+  tile.append(image,remove);root.append(tile);
+ }
+ root.hidden=aiFiles.length===0;
+}
+function toggleAiImageMode(){
+ const checkbox=$('aiMakeImage'),toggle=$('aiImageToggle');if(!checkbox||!toggle)return;
+ checkbox.checked=!checkbox.checked;
+ toggle.setAttribute('aria-pressed',String(checkbox.checked));
+ toggle.classList.toggle('is-active',checkbox.checked);
+}
+function addAiReferencePhotos(files){
+ const invalid=files.filter(f=>!['image/png','image/jpeg','image/webp'].includes(f.type)||f.size>8*1048576);
+ if(invalid.length)msg('Please choose JPG, PNG or WebP photos below 8 MB.',true,'aiMessage');
+ const valid=files.filter(f=>['image/png','image/jpeg','image/webp'].includes(f.type)&&f.size<=8*1048576);
+ if(valid.length+aiFiles.length>3)msg('You can attach up to 3 photos.',true,'aiMessage');
+ aiFiles=[...aiFiles,...valid].slice(0,3);showAiAttachments();
+}
+async function aiSend(){const button=$('aiSend'),input=$('aiPrompt'),typed=input.value.trim();
+ if(button.disabled)return;
+ const mode=$('aiMakeImage').checked?'image':'chat';
+ const message=typed||(aiFiles.length?(mode==='image'?'Create a professional product image using my attached photos.':'Please review my attached photos.'):'');
+ if(!message)return msg('Write a message or attach a photo.',true,'aiMessage');
  if(!await signedInOrPrompt(aiSend))return;
  if(!entitlement?.active)return msg('Start the monthly plan to use AI Studio.',true,'aiMessage');
- const mode=$('aiMakeImage').checked?'image':'chat';button.disabled=true;aiLine('user',message);input.value='';aiLine('assistant','');const waiting=$('aiThread').lastChild;waiting.querySelector('div').innerHTML='<span class="m-dots" aria-label="AI is working"><i></i><i></i><i></i></span>';
+ button.disabled=true;button.setAttribute('aria-busy','true');aiLine('user',message);input.value='';aiLine('assistant','');const waiting=$('aiThread').lastChild;waiting.querySelector('div').innerHTML='<span class="m-dots" aria-label="AI is working"><i></i><i></i><i></i></span>';
  try{const images=await Promise.all(aiFiles.map(fileToJpeg));const history=aiMessages.slice(-8);const ans=await post('ai',{message,mode,images,history});waiting.remove();aiLine('assistant',ans.reply,ans.imageId);
  aiMessages.push({role:'user',text:message},{role:'assistant',text:ans.reply});aiFiles=[];showAiAttachments();msg('',false,'aiMessage');
- }catch(e){waiting.remove();aiLine('assistant','Request failed: '+e.message);msg(e.message,true,'aiMessage')}finally{button.disabled=false;input.focus()}
+ }catch(e){waiting.remove();aiLine('assistant','Request failed: '+e.message);msg(e.message,true,'aiMessage')}finally{button.disabled=false;button.removeAttribute('aria-busy');input.focus()}
 }
 async function boot(){
  hydrateCachedState();
@@ -222,7 +254,10 @@ if($('sendUploads'))$('sendUploads').onclick=uploadAll;
 for(const button of document.querySelectorAll('[data-buy]'))button.onclick=()=>payment(button.dataset.buy);
 if($('profileAuthAction'))$('profileAuthAction').onclick=()=>authUser?signOut():openAuth();
 if($('verifiedBadge'))$('verifiedBadge').onclick=()=>{if(!authUser)openAuth()};
-if($('aiFiles'))$('aiFiles').onchange=e=>{const files=[...e.target.files].filter(mimeOk);aiFiles=[...aiFiles,...files].slice(0,3);showAiAttachments();e.target.value=''};
+if($('aiAddPhotos'))$('aiAddPhotos').onclick=()=>$('aiFiles')?.click();
+if($('aiImageToggle'))$('aiImageToggle').onclick=toggleAiImageMode;
+if($('aiFiles'))$('aiFiles').onchange=e=>{addAiReferencePhotos([...e.target.files]);e.target.value=''};
+if($('aiAttached'))showAiAttachments();
 if($('aiSend'))$('aiSend').onclick=aiSend;
 if($('aiPrompt'))$('aiPrompt').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();aiSend()}};
 boot();
