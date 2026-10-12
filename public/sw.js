@@ -1,6 +1,6 @@
-/* Athave AI V11 – static assets only. Never cache customer data, API, sessions, payments or uploaded images. */
-const CACHE='athave-static-v11-20261012';
-const STATIC=['/offline.html','/styles.css','/app.js','/admin.js','/pwa.js','/manifest.webmanifest','/icons/icon-192.png','/icons/icon-512.png','/icons/maskable-512.png','/icons/apple-touch-icon.png','/assets/unicorn-transparent.webp','/assets/athave-logo.webp'];
+/* Athave AI V12 – static assets only. Never cache customer data, API, sessions, payments or uploaded images. */
+const CACHE='athave-static-v12-favicon-20261012';
+const STATIC=['/offline.html','/favicon.png','/favicon-48.png','/favicon.ico','/styles.css','/app.js','/admin.js','/pwa.js','/manifest.webmanifest','/icons/icon-192.png','/icons/icon-512.png','/icons/maskable-512.png','/icons/apple-touch-icon.png','/assets/unicorn-transparent.webp','/assets/athave-logo.webp'];
 const ASSETS=new Set(STATIC);
 self.addEventListener('install',event=>{event.waitUntil((async()=>{const c=await caches.open(CACHE);await c.addAll(STATIC);await self.skipWaiting()})())});
 self.addEventListener('activate',event=>{event.waitUntil((async()=>{const names=await caches.keys();await Promise.all(names.filter(n=>n.startsWith('athave-static-')&&n!==CACHE).map(n=>caches.delete(n)));await self.clients.claim()})())});

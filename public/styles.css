@@ -140,3 +140,210 @@
 
 /* Athave AI install button — compact on desktop and mobile. */
 .pwa-install-button{margin-left:auto;border:1px solid #dde1e7;background:#fff;border-radius:11px;padding:9px 12px;color:#171a20;font:inherit;font-size:12px;font-weight:650;white-space:nowrap;cursor:pointer}.pwa-install-button:hover{background:#f5f6f8}.pwa-install-button[hidden]{display:none!important}@media(max-width:650px){.pwa-install-button{padding:9px;font-size:11px}}
+
+
+/* V13: small, deliberate UI refinements. Keep app actions and payment flows unchanged. */
+/* Install control: understated pill on wide screens, icon-only when header space is limited. */
+.site-header .pwa-install-button{
+  margin-left:auto; flex:0 0 auto; height:42px; min-height:42px;
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  padding:0 15px; border:1px solid #e0e4e9; border-radius:999px;
+  background:#fff; color:#20242b; box-shadow:0 2px 8px rgba(17,24,39,.04);
+  font:inherit; font-size:13px; font-weight:700; line-height:1; letter-spacing:0;
+  cursor:pointer; transition:background .18s ease,border-color .18s ease,transform .18s ease;
+}
+.site-header .pwa-install-button svg{width:17px;height:17px;flex:none}
+.site-header .pwa-install-button:hover{background:#f5f6f8;border-color:#c5cad3;transform:translateY(-1px)}
+.site-header .pwa-install-button:focus-visible{outline:3px solid #98a8c4;outline-offset:3px}
+.site-header .pwa-install-button:not([hidden]) ~ .profile-btn{margin-left:0}
+@media(max-width:1100px){
+  .site-header .pwa-install-button{width:40px;padding:0}
+  .site-header .pwa-install-button span{display:none}
+}
+@media(max-width:390px){
+  .site-header .nav-wrap{gap:6px}
+  .site-header .brand img{width:138px;height:52px}
+  .site-header .header-back,.site-header .profile-btn{width:34px;height:36px}
+  .site-header .pwa-install-button{width:36px;height:36px;min-height:36px}
+}
+/* Studio: center the complete credit status group, including signed-out / signed-in states. */
+body[data-page="create"] .generator-bottom .wallet-mini{
+  width:100%; max-width:100%; margin-inline:auto!important; margin-block:0!important;
+  display:flex; flex-wrap:wrap; align-items:center; justify-content:center!important;
+  text-align:center; column-gap:10px!important; row-gap:8px!important;
+  padding:4px 0!important; min-height:38px!important;
+  color:#686f7a; font-size:14px;
+}
+body[data-page="create"] .generator-bottom .wallet-label{font-weight:550}
+body[data-page="create"] .generator-bottom .wallet-mini b{font-size:14px;white-space:nowrap}
+body[data-page="create"] .generator-bottom .wallet-mini a{
+  margin:0!important; padding:7px 13px!important; border:1px solid #e2e5e9!important;
+  border-radius:999px!important;background:#f7f8fa!important;
+  color:#20242b!important;text-decoration:none!important;
+  font-size:12px;font-weight:750;line-height:1.15;
+}
+body[data-page="create"] .generator-bottom .wallet-mini a:hover{
+  background:#ebedf0!important; text-decoration:none!important;
+}
+@media(max-width:480px){
+  body[data-page="create"] .generator-bottom .wallet-mini{font-size:12px;column-gap:8px!important}
+  body[data-page="create"] .generator-bottom .wallet-mini b{font-size:12px}
+  body[data-page="create"] .generator-bottom .wallet-mini a{padding:7px 10px!important;font-size:12px}
+}
+/* Solutions: readable hierarchy, generous whitespace and restrained cards. */
+body[data-page="solution"] .seo-content{
+  width:min(1080px,calc(100% - 64px));padding-top:48px;padding-bottom:94px;
+}
+body[data-page="solution"] .crumbs{gap:9px;line-height:1.6;margin:0 0 42px;color:#7b828c;font-size:12px}
+body[data-page="solution"] .crumbs a{color:#525b67}
+body[data-page="solution"] .seo-content>.overline{margin-bottom:17px;color:#66707d;letter-spacing:.11em}
+body[data-page="solution"] .seo-content>h1{
+  max-width:850px;font-size:clamp(34px,5vw,58px);line-height:1.13;
+  letter-spacing:-.048em;color:#151a21;margin:0;
+}
+body[data-page="solution"] .seo-content>.seo-lead{
+  max-width:790px;margin:20px 0 0;font-size:clamp(15px,1.8vw,18px);
+  line-height:1.8;color:#68717e;
+}
+body[data-page="solution"] .seo-actions{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:30px 0 57px;
+}
+body[data-page="solution"] .seo-actions .btn,
+body[data-page="solution"] .seo-bottom-cta .btn{
+  min-height:51px;border-radius:12px;padding:14px 20px;
+  font-size:13px;font-weight:750;line-height:1.45;
+  white-space:normal;box-shadow:none;transition:transform .16s ease,background .16s ease;
+}
+body[data-page="solution"] .seo-actions .btn:hover,
+body[data-page="solution"] .seo-bottom-cta .btn:hover{transform:translateY(-1px)}
+body[data-page="solution"] .seo-copy-block{
+  max-width:1010px;padding:40px 0 42px;border-top:1px solid #eaedf0;
+}
+body[data-page="solution"] .seo-copy-block h2{
+  margin:0 0 19px;font-size:clamp(23px,2.6vw,30px);line-height:1.28;
+  letter-spacing:-.035em;color:#191e25;
+}
+body[data-page="solution"] .seo-copy-block>p,
+body[data-page="solution"] .seo-copy-block li p{
+  max-width:850px;margin:0;color:#646d7a;font-size:15px;line-height:1.84;
+}
+body[data-page="solution"] .seo-step-list{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:14px;list-style:none;padding:0;margin:24px 0 0;
+}
+body[data-page="solution"] .seo-step-list li{
+  min-width:0;padding:22px;border:1px solid #e7eaf0;
+  border-radius:16px;background:#fafbfc;
+}
+body[data-page="solution"] .seo-step-list strong{display:block;margin-bottom:10px;font-size:15px;line-height:1.45;color:#202630}
+body[data-page="solution"] .seo-step-list li p{font-size:13px;line-height:1.75}
+body[data-page="solution"] .seo-checklist{
+  list-style:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:12px;margin:20px 0 0;padding:0;line-height:1.65;
+}
+body[data-page="solution"] .seo-checklist li{
+  position:relative;min-width:0;padding:18px 18px 18px 43px;
+  border:1px solid #e9ecf0;border-radius:14px;background:#fff;
+  color:#505a68;font-size:13px;
+}
+body[data-page="solution"] .seo-checklist li:before{
+  content:'✓';position:absolute;left:18px;top:18px;color:#202630;font-weight:800;
+}
+body[data-page="solution"] details.seo-faq{
+  position:relative;border:1px solid #e5e8ed;border-radius:14px;
+  margin:11px 0 0;padding:17px 21px;background:#fff;
+}
+body[data-page="solution"] .seo-faq summary{
+  position:relative;padding-right:26px;line-height:1.55;
+  color:#262c35;font-weight:720;font-size:14px;list-style:none;
+}
+body[data-page="solution"] .seo-faq summary::-webkit-details-marker{display:none}
+body[data-page="solution"] .seo-faq summary:after{
+  content:'+';position:absolute;right:0;top:0;color:#798391;font-size:19px;
+}
+body[data-page="solution"] .seo-faq[open] summary:after{content:'−'}
+body[data-page="solution"] .seo-faq p{margin-top:12px;font-size:14px;line-height:1.75;color:#69717e}
+body[data-page="solution"] .seo-bottom-cta{
+  margin:25px 0 42px;padding:36px 40px;background:#171c23;
+  color:#fff;border:1px solid #171c23;border-radius:20px;
+}
+body[data-page="solution"] .seo-bottom-cta h3{max-width:620px;margin:0;font-size:clamp(23px,3vw,30px);line-height:1.25;letter-spacing:-.03em}
+body[data-page="solution"] .seo-bottom-cta p{max-width:650px;margin:14px 0 26px;color:#c3cbd6;font-size:14px;line-height:1.75}
+body[data-page="solution"] .seo-bottom-cta .btn.primary{
+  background:#fff;color:#161b21;border-color:#fff;display:inline-flex;
+}
+body[data-page="solution"] .seo-bottom-cta .btn.primary:hover{background:#eef0f3}
+body[data-page="solution"] .seo-related{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;margin-top:35px;padding-bottom:20px;
+}
+body[data-page="solution"] .seo-related h2{grid-column:1/-1;margin:0 0 8px;font-size:25px;letter-spacing:-.035em}
+body[data-page="solution"] .seo-related a{
+  display:flex;justify-content:space-between;align-items:center;gap:12px;
+  min-width:0;padding:17px 19px;border:1px solid #e7eaef;
+  border-radius:13px;background:#fff;font-size:14px;line-height:1.5;
+  color:#313946;text-decoration:none;transition:border-color .16s,background .16s;
+}
+body[data-page="solution"] .seo-related a:hover{background:#fafbfc;border-color:#c8ced7;text-decoration:none}
+body[data-page="solution"] .solutions-directory{
+  border-top:1px solid #eaedf0;padding:46px 0 54px;
+}
+body[data-page="solution"] .solutions-directory-head{
+  display:flex;align-items:end;justify-content:space-between;gap:24px;
+  margin-bottom:23px;
+}
+body[data-page="solution"] .solutions-directory-head .overline{margin:0 0 10px;font-size:11px}
+body[data-page="solution"] .solutions-directory-head h2{
+  font-size:clamp(25px,3.2vw,36px);letter-spacing:-.04em;line-height:1.25;
+  max-width:580px;margin:0;
+}
+body[data-page="solution"] .solutions-directory-head p{
+  max-width:330px;margin:0;color:#737c88;font-size:13px;line-height:1.7;
+}
+body[data-page="solution"] .solutions-directory-grid{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;
+}
+body[data-page="solution"] .solutions-directory-card{
+  display:flex;flex-direction:column;position:relative;min-width:0;min-height:199px;
+  padding:23px 22px;border:1px solid #e6e9ee;border-radius:17px;
+  background:#fff;color:#202630;transition:transform .18s,border-color .18s,box-shadow .18s;
+}
+body[data-page="solution"] .solutions-directory-card:hover,
+body[data-page="solution"] .solutions-directory-card:focus-visible{
+  border-color:#bfc6d0;box-shadow:0 12px 26px rgba(20,30,44,.06);transform:translateY(-2px);
+}
+body[data-page="solution"] .solutions-directory-tag{
+  display:inline-flex;align-self:flex-start;color:#7a828e;
+  font-size:10px;font-weight:750;letter-spacing:.1em;text-transform:uppercase;
+  margin-bottom:17px;
+}
+body[data-page="solution"] .solutions-directory-card h3{max-width:90%;font-size:18px;line-height:1.32;margin:0 0 9px;letter-spacing:-.025em}
+body[data-page="solution"] .solutions-directory-card p{font-size:12px;line-height:1.65;color:#707986;max-width:270px;margin:0 0 15px}
+body[data-page="solution"] .solutions-directory-arrow{
+  position:absolute;right:19px;top:20px;display:grid;place-items:center;
+  width:30px;height:30px;border:1px solid #e9ecf0;border-radius:50%;
+  color:#707884;font-size:17px;
+}
+@media(max-width:780px){
+  body[data-page="solution"] .seo-content{width:calc(100% - 42px);padding-top:29px}
+  body[data-page="solution"] .crumbs{margin-bottom:28px}
+  body[data-page="solution"] .seo-actions{margin-bottom:40px}
+  body[data-page="solution"] .seo-step-list,
+  body[data-page="solution"] .seo-checklist{grid-template-columns:1fr}
+  body[data-page="solution"] .solutions-directory-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  body[data-page="solution"] .solutions-directory-head{align-items:flex-start;flex-direction:column;gap:10px}
+  body[data-page="solution"] .solutions-directory-head p{max-width:700px}
+}
+@media(max-width:560px){
+  body[data-page="solution"] .seo-content{width:calc(100% - 34px);padding-bottom:68px}
+  body[data-page="solution"] .seo-content>h1{font-size:clamp(31px,9vw,41px)}
+  body[data-page="solution"] .seo-actions{gap:10px;margin:26px 0 40px}
+  body[data-page="solution"] .seo-actions .btn{width:100%;min-height:50px}
+  body[data-page="solution"] .seo-copy-block{padding:31px 0}
+  body[data-page="solution"] .seo-step-list li{padding:19px}
+  body[data-page="solution"] .seo-bottom-cta{padding:28px 22px;border-radius:17px}
+  body[data-page="solution"] .seo-related{grid-template-columns:1fr}
+  body[data-page="solution"] .solutions-directory{padding:32px 0 42px}
+  body[data-page="solution"] .solutions-directory-grid{grid-template-columns:1fr;gap:11px}
+  body[data-page="solution"] .solutions-directory-card{min-height:160px;padding:20px}
+}
