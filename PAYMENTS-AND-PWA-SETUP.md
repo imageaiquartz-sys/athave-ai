@@ -3,7 +3,6 @@
 ## PWA
 
 Upload ALL files in this package to `imageaiquartz-sys/athave-ai` main branch, preserving folders. Cloudflare Pages build command: `exit 0`; output directory `public`.
-
 Install tests:
 - `https://athave.in/manifest.webmanifest` → valid JSON
 - `https://athave.in/icons/icon-192.png` and `/icons/icon-512.png` → real PNG square images
