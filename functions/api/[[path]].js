@@ -565,6 +565,17 @@ async function handleManual(req,env,isAdmin){
   const r=await manualFileFromStorage(env,setting.object_path,setting.mime_type);
   r.headers.set('Cache-Control','public, max-age=60');return r;
  }
+ if(route==='gallery'&&method==='GET'){
+  const rows=await tbl(env,'GET','manual_site_settings','?id=in.(showcase-1,showcase-2,showcase-3)&select=id,object_path,updated_at');
+  return json({images:[1,2,3].map(slot=>{const x=rows?.find(y=>y.id==='showcase-'+slot);return {slot,imageUrl:x?.object_path?'/api/manual/gallery/image?slot='+slot+'&v='+encodeURIComponent(x.updated_at):null}})});
+ }
+ if(route==='gallery/image'&&method==='GET'){
+  const slot=Number(url.searchParams.get('slot'));if(![1,2,3].includes(slot))return err('Invalid image slot',400);
+  const rows=await tbl(env,'GET','manual_site_settings',`?id=eq.showcase-${slot}&select=object_path,mime_type`);
+  const asset=rows?.[0];if(!asset?.object_path)return err('No custom showcase image',404);
+  const response=await manualFileFromStorage(env,asset.object_path,asset.mime_type);
+  response.headers.set('Cache-Control','public, max-age=60');return response;
+ }
  let user=null;
  if(!admin && route!=='start'){
   user=await manualAccount(req,env);
@@ -699,6 +710,26 @@ async function handleManual(req,env,isAdmin){
   if(!saved.ok)throw Error('Homepage image upload failed');
   await tbl(env,'POST','manual_site_settings','?on_conflict=id',{id:HERO_KEY,mode,object_path:objectPath,mime_type:file.type,updated_at:new Date().toISOString()},{headers:{prefer:'resolution=merge-duplicates,return=minimal'}});
   return json({saved:true,mode,imageUrl:'/api/manual/hero/image?v='+Date.now()});
+ }
+ if(route==='admin/gallery'&&method==='GET'){
+  const rows=await tbl(env,'GET','manual_site_settings','?id=in.(showcase-1,showcase-2,showcase-3)&select=id,object_path,updated_at');
+  return json({images:[1,2,3].map(slot=>{const x=rows?.find(y=>y.id==='showcase-'+slot);return {slot,imageUrl:x?.object_path?'/api/manual/gallery/image?slot='+slot+'&v='+encodeURIComponent(x.updated_at):null}})});
+ }
+ if(route==='admin/gallery'&&method==='POST'){
+  const form=await req.formData(),slot=Number(form.get('slot')),mode=String(form.get('mode')||'');
+  if(![1,2,3].includes(slot))return err('Invalid showcase image slot',400);
+  if(!['replace','default'].includes(mode))return err('Invalid image action',400);
+  const key='showcase-'+slot;
+  if(mode==='default'){
+   await tbl(env,'POST','manual_site_settings','?on_conflict=id',{id:key,mode:'default',object_path:null,mime_type:null,updated_at:new Date().toISOString()},{headers:{prefer:'resolution=merge-duplicates,return=minimal'}});
+   return json({saved:true,slot,imageUrl:null});
+  }
+  const file=form.get('file'),info=validManualImage(file,8*1048576);
+  const path=`site/gallery/${slot}/${crypto.randomUUID()}.${info.suffix}`;
+  const uploaded=await supa(env,'POST',`/storage/v1/object/${MANUAL_BUCKET}/${path}`,await file.arrayBuffer(),{raw:true,headers:{'content-type':file.type,'x-upsert':'false'},response:true});
+  if(!uploaded.ok)throw Error('Image upload failed');
+  await tbl(env,'POST','manual_site_settings','?on_conflict=id',{id:key,mode:'background',object_path:path,mime_type:file.type,updated_at:new Date().toISOString()},{headers:{prefer:'resolution=merge-duplicates,return=minimal'}});
+  return json({saved:true,slot,imageUrl:'/api/manual/gallery/image?slot='+slot+'&v='+Date.now()});
  }
  if(route==='admin/deliver'&&method==='POST'){
   const form=await req.formData(),id=String(form.get('uploadId')||'');if(!UUID_RE.test(id))return err('Invalid upload');

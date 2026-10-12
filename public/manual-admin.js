@@ -1,56 +1,91 @@
+/* Athave AI: sectioned private admin dashboard. API grants are checked server-side. */
 const $=id=>document.getElementById(id);
-const STATUS=$('adminNote');
-let people=[],selectedCustomerId=null,working=false;
-const status=(message,error=false,target=STATUS)=>{target.textContent=message;target.classList.toggle('error',error)};
-async function req(path,config={}){
- const response=await fetch('/api/'+path,{credentials:'same-origin',cache:'no-store',...config});
- const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||'Request failed');return data;
+let people=[], selectedCustomerId=null, busyDeliver=false, inflight=0;
+const fallbackGallery={1:'/assets/athave-marble-showcase.webp',2:'/assets/athave-shirt.webp',3:'/assets/athave-earbuds-cutout.webp'};
+const note=(text='',error=false,target=$('adminNote'))=>{if(!target)return;target.textContent=text;target.classList.toggle('error',error)};
+const time=x=>x?new Date(x).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):'—';
+function busy(label='Loading…',start=true){inflight=Math.max(0,inflight+(start?1:-1));$('adminLoader').hidden=inflight===0;if(start)$('adminLoadingText').textContent=label;}
+async function req(path,options={}){
+ busy(options.method==='POST'?'Saving changes…':'Loading dashboard…');
+ try{const response=await fetch('/api/'+path,{credentials:'same-origin',cache:'no-store',...options});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.error||'Request failed (HTTP '+response.status+')');return data}
+ finally{busy('',false)}
 }
 const post=(path,body)=>req(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
-const adminImage=(kind,id)=>'/api/manual/admin/file?kind='+encodeURIComponent(kind)+'&id='+encodeURIComponent(id);
-const fmtTime=x=>new Date(x).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'});
-function view(unlocked){$('unlockPanel').hidden=unlocked;$('adminWorkspace').hidden=!unlocked;$('adminLock').hidden=!unlocked}
-function renderCustomers(){const root=$('customerCards');root.replaceChildren();const q=$('searchCustomers').value.toLowerCase().trim();const list=people.filter(p=>p.total>0&&(!q||p.display_name.toLowerCase().includes(q)||p.contact.toLowerCase().includes(q)||p.id.toLowerCase().includes(q)));
- $('totalCustomerCount').textContent='('+list.length+')';if(!list.length){root.innerHTML='<div class="m-empty">No customer uploads found.</div>';return}
- list.sort((a,b)=>b.processing-a.processing||b.total-a.total);
- for(const customer of list){const button=document.createElement('button');button.type='button';button.className='admin-customer-card';button.setAttribute('aria-label','Open '+customer.display_name);
- const head=document.createElement('div');head.className='admin-customer-top';const avatar=document.createElement('span');avatar.className='m-avatar';avatar.textContent=(customer.display_name||'A')[0].toUpperCase();
- const d=document.createElement('div');const name=document.createElement('strong');name.textContent=customer.display_name;const contact=document.createElement('small');contact.textContent=customer.contact||'Private customer workspace';d.append(name,contact);head.append(avatar,d);
- const foot=document.createElement('div');foot.className='admin-card-counts';const total=document.createElement('span');total.textContent=customer.total+' uploaded photo'+(customer.total===1?'':'s');const pending=document.createElement('strong');pending.textContent=customer.processing+' processing';foot.append(total,pending);button.append(head,foot);
- button.onclick=()=>openCustomer(customer.id);root.append(button)}
+const imageSrc=(kind,id)=>'/api/manual/admin/file?kind='+encodeURIComponent(kind)+'&id='+encodeURIComponent(id);
+function unlocked(yes){$('unlockPanel').hidden=yes;$('adminWorkspace').hidden=!yes;$('adminLock').hidden=!yes;if(yes)changeTab('overview')}
+function changeTab(tab){const good=['overview','uploads','customers','images','settings'];if(!good.includes(tab))return;
+ for(const item of good){const active=item===tab;$('tab-'+item).hidden=!active;const button=document.querySelector('[data-tab="'+item+'"]');button.classList.toggle('is-active',active);button.setAttribute('aria-selected',String(active))}
+ const url=new URL(location.href);url.hash=tab==='overview'?'':tab;history.replaceState(null,'',url);
 }
-async function loadCustomers(){const response=await req('manual/admin/customers');people=response.customers;renderCustomers();status('');}
-function resultLink(id,name){const link=document.createElement('a');link.href=adminImage('result',id);link.target='_blank';link.rel='noopener noreferrer';link.textContent=name;return link}
-async function openCustomer(id){selectedCustomerId=id;$('customerDetail').hidden=false;$('detailName').textContent='Loading…';$('detailUploads').replaceChildren();try{
- const data=await req('manual/admin/customer?id='+encodeURIComponent(id));if(id!==selectedCustomerId)return;
- $('detailName').textContent=data.customer.display_name;$('detailContact').textContent=data.customer.contact||'No contact provided';
- const total=data.uploads.length,processing=data.uploads.filter(x=>x.status==='processing').length;
- const stats=$('detailSummary');stats.replaceChildren();for(const v of [total+' photos',processing+' processing',data.entitlement.active?data.entitlement.remaining+' uploads remaining':'Plan inactive']){const span=document.createElement('span');span.textContent=v;stats.append(span)}
- const root=$('detailUploads');root.replaceChildren();if(!total)root.innerHTML='<div class="m-empty">No photos.</div>';
- for(const upload of data.uploads){const row=document.createElement('article');row.className='admin-upload-card';const pic=document.createElement('img');pic.src=adminImage('source',upload.id);pic.alt='Original '+upload.filename;pic.loading='lazy';
- const right=document.createElement('div'),title=document.createElement('strong');title.textContent=upload.filename;const when=document.createElement('small');when.textContent=fmtTime(upload.created_at);const badge=document.createElement('span');badge.className='m-badge'+(upload.status==='completed'?' done':'');badge.textContent=upload.status==='completed'?'Completed':'Processing';right.append(title,when,badge);
- const links=document.createElement('div');links.className='admin-file-list';for(const [i,result] of upload.deliveries.entries())links.append(resultLink(result.id,'Result '+(i+1)+' ↗'));
- const sourceLink=document.createElement('a');sourceLink.href=adminImage('source',upload.id);sourceLink.target='_blank';sourceLink.rel='noopener noreferrer';sourceLink.textContent='View original ↗';links.prepend(sourceLink);right.append(links);
- const form=document.createElement('form');form.className='admin-deliver-form';const input=document.createElement('input');input.type='file';input.multiple=true;input.accept='image/jpeg,image/png,image/webp';input.required=true;input.setAttribute('aria-label','Finished images for '+upload.filename);
- const send=document.createElement('button');send.type='submit';send.className='m-btn m-primary m-small';send.textContent='Upload results';
- const message=document.createElement('div');message.className='admin-deliver-status';form.append(input,send);
- form.onsubmit=async e=>{e.preventDefault();if(working||!input.files.length)return;working=true;send.disabled=true;let done=0;try{
-   for(const file of [...input.files]){
-    if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>12*1048576)throw Error('Use JPG/PNG/WebP up to 12 MB');
-    const formData=new FormData();formData.set('uploadId',upload.id);formData.set('file',file);status('Delivering '+file.name+' ('+(done+1)+'/'+input.files.length+')…',false,message);
-    await req('manual/admin/deliver',{method:'POST',body:formData});done++;
-   }
-   status(done+' result'+(done===1?'':'s')+' delivered.',false,message);await openCustomer(id);await loadCustomers();
-  }catch(err){status(done+' delivered. '+err.message,true,message)}finally{working=false;send.disabled=false}};
- right.append(form,message);row.append(pic,right);root.append(row)}
- $('customerDetail').scrollIntoView({behavior:'smooth',block:'start'});
- }catch(e){status(e.message,true)}}
-$('unlockForm').onsubmit=async e=>{e.preventDefault();const id=$('adminId').value.trim(),button=e.currentTarget.querySelector('button');button.disabled=true;try{await post('admin/login',{id});$('adminId').value='';view(true);await loadCustomers();await loadHeroAdmin()}catch(e){status(e.message,true,$('unlockError'))}finally{button.disabled=false}};
-$('adminLock').onclick=async()=>{await post('admin/logout',{}).catch(()=>{});view(false);status('Admin locked.')};
+for(const button of document.querySelectorAll('[data-tab]'))button.onclick=()=>changeTab(button.dataset.tab);
+for(const button of document.querySelectorAll('[data-go]'))button.onclick=()=>changeTab(button.dataset.go);
+function renderStats(){const customers=people.length,uploads=people.reduce((n,p)=>n+(p.total||0),0),processing=people.reduce((n,p)=>n+(p.processing||0),0);
+ $('statCustomers').textContent=String(customers);$('statUploads').textContent=String(uploads);$('statProcessing').textContent=String(processing);$('statCompleted').textContent=String(uploads-processing);$('tabProcessingCount').textContent=String(processing);
+}
+function renderCard(root,c){const card=document.createElement('button');card.type='button';card.className='admin-customer-card';card.setAttribute('aria-label','Open uploads for '+c.display_name);
+ const top=document.createElement('div');top.className='admin-customer-top';const avatar=document.createElement('span');avatar.className='m-avatar';avatar.textContent=(c.display_name||'A')[0].toUpperCase();
+ const desc=document.createElement('div');const title=document.createElement('strong');title.textContent=c.display_name||'Customer';const contact=document.createElement('small');contact.textContent=c.contact||'Athave customer';desc.append(title,contact);top.append(avatar,desc);
+ const foot=document.createElement('div');foot.className='admin-card-counts';const total=document.createElement('span');total.textContent=(c.total||0)+' uploaded';const pending=document.createElement('strong');pending.className=c.processing?'admin-pending':'admin-clear';pending.textContent=c.processing?c.processing+' processing':'Up to date';foot.append(total,pending);
+ card.append(top,foot);card.onclick=()=>openCustomer(c.id);root.append(card);
+}
+function renderCustomers(){
+ const query=$('searchCustomers').value.toLowerCase().trim(),allQuery=$('searchAllCustomers').value.toLowerCase().trim(),filter=$('uploadFilter').value;
+ const match=(p,q)=>!q||[p.display_name,p.contact,p.id].some(x=>String(x||'').toLowerCase().includes(q));
+ const active=people.filter(c=>c.total>0&&match(c,query)&&(filter==='pending'?c.processing>0:filter==='completed'?c.total>c.processing:true)).sort((a,b)=>b.processing-a.processing||b.total-a.total);
+ const uploadsRoot=$('customerCards');uploadsRoot.replaceChildren();$('totalCustomerCount').textContent='('+active.length+')';for(const c of active)renderCard(uploadsRoot,c);
+ if(!active.length)uploadsRoot.innerHTML='<div class="m-empty">No matching upload orders.</div>';
+ const all=people.filter(c=>match(c,allQuery));const allRoot=$('allCustomerCards');allRoot.replaceChildren();for(const c of all)renderCard(allRoot,c);
+ if(!all.length)allRoot.innerHTML='<div class="m-empty">No matching customers.</div>';
+}
+async function loadCustomers(){const data=await req('manual/admin/customers');people=data.customers||[];renderStats();renderCustomers();note('')}
+function linkFor(id,title){const link=document.createElement('a');link.href=imageSrc('result',id);link.target='_blank';link.rel='noopener noreferrer';link.textContent=title;return link}
+function makeUploadRow(upload,customerId){const row=document.createElement('article');row.className='admin-upload-card';
+ const image=document.createElement('img');image.loading='lazy';image.src=imageSrc('source',upload.id);image.alt='Original '+upload.filename;
+ const right=document.createElement('div');right.className='admin-upload-info';const title=document.createElement('strong');title.textContent=upload.filename;
+ const small=document.createElement('small');small.textContent=time(upload.created_at);const badge=document.createElement('span');badge.className='m-badge'+(upload.status==='completed'?' done':'');badge.textContent=upload.status==='completed'?'Completed':'Processing';right.append(title,small,badge);
+ const links=document.createElement('div');links.className='admin-file-list';const source=document.createElement('a');source.href=imageSrc('source',upload.id);source.target='_blank';source.rel='noopener noreferrer';source.textContent='Original photo ↗';links.append(source);
+ for(const [i,result] of (upload.deliveries||[]).entries())links.append(linkFor(result.id,'Result '+(i+1)+' ↗'));right.append(links);
+ const form=document.createElement('form');form.className='admin-deliver-form';const input=document.createElement('input');input.type='file';input.accept='image/jpeg,image/png,image/webp';input.multiple=true;input.required=true;input.className='visually-hidden';input.id='delivery-'+upload.id;
+ const chooser=document.createElement('label');chooser.className='admin-custom-file';chooser.htmlFor=input.id;chooser.innerHTML='<span class="file-icon">↑</span><span><strong>Choose finished files</strong><small>One or multiple JPG, PNG, WebP images</small></span>';
+ const save=document.createElement('button');save.type='submit';save.className='m-btn m-primary m-small';save.textContent='Deliver files →';const message=document.createElement('p');message.className='admin-deliver-status';message.setAttribute('role','status');
+ input.onchange=()=>{chooser.querySelector('small').textContent=input.files.length?(input.files.length+' selected · '+[...input.files].map(f=>f.name).slice(0,2).join(', ')):'One or multiple finished images'};
+ form.append(chooser,input,save);form.onsubmit=async e=>{e.preventDefault();if(busyDeliver||!input.files.length)return;const files=[...input.files];busyDeliver=true;save.disabled=true;let delivered=0;
+  try{for(const file of files){if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>12*1048576)throw Error('Use JPG/PNG/WebP under 12 MB each');note('Delivering '+file.name+' ('+(delivered+1)+'/'+files.length+')…',false,message);const data=new FormData();data.set('uploadId',upload.id);data.set('file',file);await req('manual/admin/deliver',{method:'POST',body:data});delivered++}
+   await loadCustomers();await openCustomer(customerId,{scroll:false});note(delivered+' file'+(delivered===1?'':'s')+' delivered successfully.');
+  }catch(ex){note(delivered+' delivered. '+ex.message,true,message)}finally{busyDeliver=false;save.disabled=false}
+ };
+ right.append(form,message);row.append(image,right);return row;
+}
+async function openCustomer(id,{scroll=true}={}){selectedCustomerId=id;changeTab('uploads');$('customerDetail').hidden=false;$('detailName').textContent='Loading customer…';$('detailUploads').replaceChildren();
+ try{const info=await req('manual/admin/customer?id='+encodeURIComponent(id));if(id!==selectedCustomerId)return;
+ $('detailName').textContent=info.customer.display_name;$('detailContact').textContent=info.customer.contact||'Verified customer workspace';const stats=$('detailSummary');stats.replaceChildren();const n=(info.uploads||[]).length;const pending=info.uploads.filter(x=>x.status==='processing').length;
+ for(const text of [n+' uploads',pending+' processing',info.entitlement.active?info.entitlement.remaining+' uploads remaining':'Plan inactive']){const tag=document.createElement('span');tag.textContent=text;stats.append(tag)}
+ const root=$('detailUploads');root.replaceChildren();for(const item of info.uploads||[])root.append(makeUploadRow(item,id));if(!n)root.innerHTML='<div class="m-empty">This customer has not uploaded any photos yet.</div>';
+ if(scroll)$('customerDetail').scrollIntoView({behavior:'smooth',block:'start'});
+ }catch(ex){note(ex.message,true)}
+}
 $('closeDetail').onclick=()=>{$('customerDetail').hidden=true;selectedCustomerId=null};
-$('refreshAdmin').onclick=async()=>{try{await loadCustomers();if(selectedCustomerId)await openCustomer(selectedCustomerId)}catch(e){status(e.message,true)}};
-$('searchCustomers').oninput=renderCustomers;
-(async()=>{try{const state=await req('admin/status');view(state.unlocked);if(state.unlocked){await loadCustomers();await loadHeroAdmin()}else if(!state.configured)status('Configure ADMIN_ACCESS_ID and SESSION_SECRET in Cloudflare first.',true)}catch(e){view(false);status(e.message,true)}})();
-
-async function loadHeroAdmin(){try{const state=await req('manual/admin/hero');$('heroMode').value=state.mode==='default'?'default':state.mode;$('heroPreview').src=state.imageUrl||'/assets/athave-shirt.webp'}catch(e){status(e.message,true,$('heroAdminStatus'))}}
-$('heroForm').onsubmit=async e=>{e.preventDefault();const mode=$('heroMode').value,file=$('heroInput').files[0],button=e.currentTarget.querySelector('button[type=submit]');if(mode!=='default'&&!file)return status('Choose an image before saving.',true,$('heroAdminStatus'));button.disabled=true;try{const f=new FormData();f.set('mode',mode);if(file)f.set('file',file);await req('manual/admin/hero',{method:'POST',body:f});$('heroInput').value='';await loadHeroAdmin();status('Homepage image saved. New visitors will see it.',false,$('heroAdminStatus'))}catch(err){status(err.message,true,$('heroAdminStatus'))}finally{button.disabled=false}};
+$('refreshAdmin').onclick=async()=>{try{await loadCustomers();if(selectedCustomerId)await openCustomer(selectedCustomerId,{scroll:false})}catch(e){note(e.message,true)}};
+$('refreshOverview').onclick=()=>loadCustomers().catch(e=>note(e.message,true));
+$('searchCustomers').oninput=renderCustomers;$('searchAllCustomers').oninput=renderCustomers;$('uploadFilter').onchange=renderCustomers;
+// Hero appearance editor (keeps the existing V17 secure hero endpoint).
+async function loadHeroAdmin(){try{const setting=await req('manual/admin/hero');$('heroMode').value=setting.mode||'default';$('heroPreview').src=setting.imageUrl||'/assets/athave-marble-showcase.webp';$('heroPreview').classList.toggle('cutout',setting.mode==='transparent')}catch(e){note(e.message,true,$('heroAdminStatus'))}}
+function updateLocalImage(input,preview,fileText){const file=input.files[0];if(!file)return;fileText.textContent=file.name;const url=URL.createObjectURL(file);preview.onload=()=>URL.revokeObjectURL(url);preview.src=url}
+$('heroInput').onchange=()=>updateLocalImage($('heroInput'),$('heroPreview'),$('heroFileName'));
+$('heroMode').onchange=()=>{$('heroPreview').classList.toggle('cutout',$('heroMode').value==='transparent');const off=$('heroMode').value==='default';$('heroInput').disabled=off;$('heroInput').closest('.admin-image-editor').classList.toggle('is-reset',off)};
+$('heroForm').onsubmit=async e=>{e.preventDefault();const mode=$('heroMode').value,file=$('heroInput').files[0],button=e.currentTarget.querySelector('[type=submit]');if(mode!=='default'&&!file)return note('Select an image first.',true,$('heroAdminStatus'));
+ button.disabled=true;try{const form=new FormData();form.set('mode',mode);if(file)form.set('file',file);await req('manual/admin/hero',{method:'POST',body:form});$('heroInput').value='';$('heroFileName').textContent='JPG, PNG or WebP · Up to 8 MB';await loadHeroAdmin();note('Homepage artwork updated.',false,$('heroAdminStatus'))}catch(e){note(e.message,true,$('heroAdminStatus'))}finally{button.disabled=false}
+};
+// Gallery editor: independent slot controls, saved to the same private bucket.
+async function loadGalleryAdmin(){try{const data=await req('manual/admin/gallery');for(const item of data.images||[]){const node=$('galleryPreview'+item.slot);if(node)node.src=item.imageUrl||fallbackGallery[item.slot]}}catch(e){for(let n=1;n<=3;n++)note(e.message,true,$('galleryStatus'+n))}}
+for(let slot=1;slot<=3;slot++){
+ const input=$('galleryFile'+slot);input.onchange=()=>updateLocalImage(input,$('galleryPreview'+slot),$('galleryFileName'+slot));
+ const form=document.querySelector('.gallery-form[data-slot="'+slot+'"]');form.onsubmit=async e=>{e.preventDefault();const file=input.files[0],button=e.currentTarget.querySelector('[type=submit]');if(!file)return note('Choose an image.',true,$('galleryStatus'+slot));button.disabled=true;
+  try{const body=new FormData();body.set('slot',String(slot));body.set('mode','replace');body.set('file',file);await req('manual/admin/gallery',{method:'POST',body});input.value='';$('galleryFileName'+slot).textContent='JPG, PNG or WebP';await loadGalleryAdmin();note('Showcase image saved.',false,$('galleryStatus'+slot))}catch(err){note(err.message,true,$('galleryStatus'+slot))}finally{button.disabled=false}
+ };
+ document.querySelector('[data-reset="'+slot+'"]').onclick=async()=>{if(!confirm('Restore the original showcase image?'))return;try{const body=new FormData();body.set('slot',String(slot));body.set('mode','default');await req('manual/admin/gallery',{method:'POST',body});await loadGalleryAdmin();note('Original image restored.',false,$('galleryStatus'+slot))}catch(e){note(e.message,true,$('galleryStatus'+slot))}};
+}
+async function initialize(){const state=await req('admin/status');unlocked(state.unlocked);if(state.unlocked){await Promise.all([loadCustomers(),loadHeroAdmin(),loadGalleryAdmin()]);const wanted=location.hash.slice(1);if(['overview','uploads','customers','images','settings'].includes(wanted))changeTab(wanted)}else if(!state.configured)note('Configure ADMIN_ACCESS_ID and SESSION_SECRET in Cloudflare first.',true)}
+$('unlockForm').onsubmit=async e=>{e.preventDefault();const b=e.currentTarget.querySelector('[type=submit]'),id=$('adminId').value.trim();b.disabled=true;try{await post('admin/login',{id});$('adminId').value='';unlocked(true);await Promise.all([loadCustomers(),loadHeroAdmin(),loadGalleryAdmin()]);note('Dashboard unlocked.')}catch(ex){note(ex.message,true,$('unlockError'))}finally{b.disabled=false}};
+$('adminLock').onclick=async()=>{try{await post('admin/logout',{});}catch{}unlocked(false);people=[];selectedCustomerId=null;note('Admin locked.')};
+initialize().catch(e=>{unlocked(false);note(e.message,true)});

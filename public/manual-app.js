@@ -1,20 +1,27 @@
-/* Athave V16: customer-facing manual order workflow with anonymous signed sessions. */
+/* Athave AI: verified OTP account, manual uploads, member plan and optional AI studio. */
 const $=id=>document.getElementById(id);
 const API='/api/manual/';
 const page=document.body.dataset.page;
 let customer=null, entitlement=null, uploadFiles=[], uploadBusy=false, aiFiles=[], aiMessages=[];
 let authUser=null, authAfter=null, authOpen=false, authPendingPhone='', checkoutBusy=false;
 const msg=(message,error=false,id='uploadMessage')=>{const node=$(id)||$('appToast');if(!node)return;node.textContent=message;node.classList.toggle('error',error);node.hidden=false};
+let loadingRequests=0;
+function loadingVisual(active){
+ let loader=$('customerLoader');if(!loader){loader=document.createElement('div');loader.id='customerLoader';loader.className='customer-loader';loader.setAttribute('role','status');loader.setAttribute('aria-label','Loading');loader.innerHTML='<span class="m-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>Processing…</span>';loader.hidden=true;document.body.append(loader)}
+ loadingRequests=Math.max(0,loadingRequests+(active?1:-1));loader.hidden=loadingRequests===0;
+}
 async function request(route, init={}){
- const res=await fetch(API+route,{credentials:'same-origin',cache:'no-store',...init});
- const val=await res.json().catch(()=>({}));if(!res.ok)throw Error(val.error||'Request failed: '+res.status);return val;
+ loadingVisual(true);
+ try{const res=await fetch(API+route,{credentials:'same-origin',cache:'no-store',...init});
+ const val=await res.json().catch(()=>({}));if(!res.ok)throw Error(val.error||'Request failed: '+res.status);return val;}
+ finally{loadingVisual(false)}
 }
 const post=(route,body)=>request(route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 // Secure OTP login; the server stores the session in a signed HttpOnly cookie.
 function authOverlay(){
  if($('athaveOtpOverlay'))return;
  const aside=document.createElement('div');aside.id='athaveOtpOverlay';aside.className='m-auth-overlay';aside.hidden=true;
- aside.innerHTML=`<div class="m-auth-shade" data-close></div><section class="m-auth-dialog" role="dialog" aria-modal="true" aria-label="Sign in to Athave AI"><button type="button" class="m-auth-close" data-close aria-label="Close sign in">×</button><img src="/assets/athave-logo.webp" alt="Athave AI"/><h2>Sign in</h2><p>Continue with your mobile number</p><form id="mPhoneForm"><label>Mobile number</label><div class="m-auth-phone"><b>+91</b><input id="mPhone" inputmode="numeric" autocomplete="tel-national" type="tel" maxlength="10" pattern="[0-9]{10}" placeholder="10-digit mobile" required></div><button class="m-btn m-primary m-block" type="submit">Send OTP →</button></form><form hidden id="mOtpForm"><label>Verification code</label><input id="mOtp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" pattern="[0-9]{4,8}" placeholder="Enter OTP" required><button class="m-btn m-primary m-block" type="submit">Verify & continue →</button><button type="button" class="m-link-button" id="mSendAgain">Resend OTP</button><button type="button" class="m-link-button" id="mPhoneBack">Change phone</button></form><form hidden id="mNameForm"><label>Your name</label><input id="mName" maxlength="80" autocomplete="name" required placeholder="Enter your name"><button type="submit" class="m-btn m-primary m-block">Create account →</button></form><p id="mAuthStatus" role="status" class="m-notice"></p><small>By signing in you agree to our <a href="/terms/">Terms</a> and <a href="/privacy/">Privacy Policy</a>.</small></section>`;
+ aside.innerHTML=`<div class="m-auth-shade" data-close></div><section class="m-auth-dialog" role="dialog" aria-modal="true" aria-label="Sign in to Athave AI"><button type="button" class="m-auth-close" data-close aria-label="Close sign in">×</button><img src="/assets/athave-logo-official.webp" alt="Athave AI"/><h2>Sign in</h2><p>Continue with your mobile number</p><form id="mPhoneForm"><label>Mobile number</label><div class="m-auth-phone"><b>+91</b><input id="mPhone" inputmode="numeric" autocomplete="tel-national" type="tel" maxlength="10" pattern="[0-9]{10}" placeholder="10-digit mobile" required></div><button class="m-btn m-primary m-block" type="submit">Send OTP →</button></form><form hidden id="mOtpForm"><label>Verification code</label><input id="mOtp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" pattern="[0-9]{4,8}" placeholder="Enter OTP" required><button class="m-btn m-primary m-block" type="submit">Verify & continue →</button><button type="button" class="m-link-button" id="mSendAgain">Resend OTP</button><button type="button" class="m-link-button" id="mPhoneBack">Change phone</button></form><form hidden id="mNameForm"><label>Your name</label><input id="mName" maxlength="80" autocomplete="name" required placeholder="Enter your name"><button type="submit" class="m-btn m-primary m-block">Create account →</button></form><p id="mAuthStatus" role="status" class="m-notice"></p><small>By signing in you agree to our <a href="/terms/">Terms</a> and <a href="/privacy/">Privacy Policy</a>.</small></section>`;
  document.body.append(aside);
  for(const close of aside.querySelectorAll('[data-close]'))close.onclick=closeAuth;
  $('mPhoneForm').onsubmit=async e=>{
@@ -34,8 +41,8 @@ function authOverlay(){
 function showAuthStep(id){for(const name of ['mPhoneForm','mOtpForm','mNameForm'])$(name).hidden=name!==id}
 function authMessage(text,error=false){const box=$('mAuthStatus');if(box){box.textContent=text;box.classList.toggle('error',error)}}
 async function authAction(path,body,formId,done){
- const form=$(formId),button=form?.querySelector('button[type=submit]');if(button)button.disabled=true;authMessage('Please wait…');
- try{const result=await fetch('/api/'+path,{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const data=await result.json().catch(()=>({}));if(!result.ok)throw Error(data.error||'Verification failed');await done(data)}catch(e){authMessage(e.message,true)}finally{if(button)button.disabled=false}
+ const form=$(formId),button=form?.querySelector('button[type=submit]');if(button)button.disabled=true;loadingVisual(true);authMessage('Verifying…');
+ try{const result=await fetch('/api/'+path,{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const data=await result.json().catch(()=>({}));if(!result.ok)throw Error(data.error||'Verification failed');await done(data)}catch(e){authMessage(e.message,true)}finally{if(button)button.disabled=false;loadingVisual(false)}
 }
 function openAuth(after){authOverlay();if(typeof after==='function')authAfter=after;authOpen=true;$('athaveOtpOverlay').hidden=false;showAuthStep('mPhoneForm');authMessage('');setTimeout(()=>$('mPhone')?.focus(),30)}
 function closeAuth(){if(!authOpen)return;authOpen=false;$('athaveOtpOverlay').hidden=true;authAfter=null}
@@ -63,8 +70,13 @@ function updateProfileAuth(){
 async function showHero(){
  const root=$('homepageArt');if(!root)return;
  try{const setting=await request('hero');const pic=$('homepageImage');root.classList.toggle('m-with-background',setting.mode==='background');root.classList.toggle('m-transparent-image',setting.mode==='transparent');
-  pic.src=setting.imageUrl||'/assets/athave-shirt.webp';pic.alt='Athave AI example product image';
+  const isDefault=setting.mode==='default';root.classList.toggle('m-with-background',isDefault||setting.mode==='background');
+  pic.src=setting.imageUrl||'/assets/athave-marble-showcase.webp';pic.alt='Athave AI luxury product catalogue image';
  }catch{} // Default image remains available if custom settings could not be read.
+}
+async function loadGallery(){
+ const sources={1:'/assets/athave-marble-showcase.webp',2:'/assets/athave-shirt.webp',3:'/assets/athave-earbuds-cutout.webp'};
+ try{const gallery=await request('gallery');for(const item of gallery.images||[]){const pic=$('showcaseImg'+item.slot);if(pic)pic.src=item.imageUrl||sources[item.slot]}}catch{} // static images are the safe fallback
 }
 function date(d){return d?new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—'}
 async function initSession(){
@@ -174,13 +186,13 @@ function showAiAttachments(){const root=$('aiAttached');root.replaceChildren();f
 async function aiSend(){const button=$('aiSend'),input=$('aiPrompt'),message=input.value.trim();if(!message)return msg('Enter a question or image request.',true,'aiMessage');
  if(!await signedInOrPrompt(aiSend))return;
  if(!entitlement?.active)return msg('Start the monthly plan to use AI Studio.',true,'aiMessage');
- const mode=$('aiMakeImage').checked?'image':'chat';button.disabled=true;aiLine('user',message);input.value='';aiLine('assistant','Working on your request…');const waiting=$('aiThread').lastChild;
+ const mode=$('aiMakeImage').checked?'image':'chat';button.disabled=true;aiLine('user',message);input.value='';aiLine('assistant','');const waiting=$('aiThread').lastChild;waiting.querySelector('div').innerHTML='<span class="m-dots" aria-label="AI is working"><i></i><i></i><i></i></span>';
  try{const images=await Promise.all(aiFiles.map(fileToJpeg));const history=aiMessages.slice(-8);const ans=await post('ai',{message,mode,images,history});waiting.remove();aiLine('assistant',ans.reply,ans.imageId);
  aiMessages.push({role:'user',text:message},{role:'assistant',text:ans.reply});aiFiles=[];showAiAttachments();msg('',false,'aiMessage');
  }catch(e){waiting.remove();aiLine('assistant','Request failed: '+e.message);msg(e.message,true,'aiMessage')}finally{button.disabled=false;input.focus()}
 }
 async function boot(){
- if(page==='home'){await showHero();return}
+ if(page==='home'){await Promise.allSettled([showHero(),loadGallery()]);return}
  await getAuth();updateProfileAuth();
  if(!authUser){
   customer=null;entitlement=null;renderPlan();
