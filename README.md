@@ -5,9 +5,9 @@ This is a **complete GitHub + Cloudflare Pages project**, forked directly from V
 ## Installation
 1. Back up the current GitHub repository. Extract this ZIP and upload its **contents**, not the ZIP, to your existing `athave-ai` repository on the `main` branch, overwriting prior files. Cloudflare Pages deployment stays build command `exit 0`, output directory `public`, framework None.
 2. Keep your configured production Cloudflare secrets intact. SEO does not need additional API keys.
-3. When the deploy succeeds, confirm `https://athave-ai.pages.dev/robots.txt`, `https://athave-ai.pages.dev/sitemap.xml`, homepage and `/solutions/`. Check `https://athave-ai.pages.dev/admin/` separately, but do not submit it for indexing.
-4. Open [Google Search Console](https://search.google.com/search-console/) and add a **URL-prefix property** for `https://athave-ai.pages.dev/` (or verify your real custom domain first). Use DNS or HTML tag verification as offered. Paste the provided Search Console meta verification tag into `public/index.html` if using tag method; Cloudflare redeploy is needed.
-5. Submit `https://athave-ai.pages.dev/sitemap.xml` in Search Console → Sitemaps, then inspect the home page, `/solutions/` and `/about/`. Indexing is not immediate or guaranteed.
+3. When the deploy succeeds, confirm `https://athave.in/robots.txt`, `https://athave.in/sitemap.xml`, homepage and `/solutions/`. Check `https://athave.in/admin/` separately, but do not submit it for indexing.
+4. Open [Google Search Console](https://search.google.com/search-console/) and add a **URL-prefix property** for `https://athave.in/` (or verify your real custom domain first). Use DNS or HTML tag verification as offered. Paste the provided Search Console meta verification tag into `public/index.html` if using tag method; Cloudflare redeploy is needed.
+5. Submit `https://athave.in/sitemap.xml` in Search Console → Sitemaps, then inspect the home page, `/solutions/` and `/about/`. Indexing is not immediate or guaranteed.
 6. Use Google [Rich Results Test](https://search.google.com/test/rich-results) and [PageSpeed Insights](https://pagespeed.web.dev/) for further validation. 
 
 ## How this SEO package works
@@ -19,7 +19,7 @@ This is a **complete GitHub + Cloudflare Pages project**, forked directly from V
 - SEO content uses consistent `Athave AI` branding. Avoid keyword stuffing, doorway pages, duplicate descriptions and deceptive JSON-LD; Google ignores the meta-keywords tag.
 
 ## Canonical domain (important)
-This package currently uses **https://athave-ai.pages.dev** because that is your established live domain. If you purchase and connect `athave.in` or another domain, **do not merely change links before DNS works**. Once it is live and verified, run `python tools/set_seo_domain.py https://YOUR-REAL-DOMAIN` to replace canonical links, Open Graph URLs and sitemap entries. Redirect the pages.dev hostname to the custom domain where possible, then verify the new Search Console property. DNS and registrar ownership are not established by this ZIP.
+This package currently uses **https://athave.in** because that is your established live domain. If you purchase and connect `athave.in` or another domain, **do not merely change links before DNS works**. Once it is live and verified, run `python tools/set_seo_domain.py https://YOUR-REAL-DOMAIN` to replace canonical links, Open Graph URLs and sitemap entries. Redirect the pages.dev hostname to the custom domain where possible, then verify the new Search Console property. DNS and registrar ownership are not established by this ZIP.
 
 ## Branded rankings
 Optimized SEO does not make any site automatically #1 for `Athave`, `Athave AI`, `athave.in`, 1,000 keywords or other broad searches. Brand uniqueness, consistent mentions, real backlinks, indexed pages and time matter. Build truthful brand links from your verified channels and your developer Quartz Web Solutions website. Search Console impressions and queries should guide which content to expand.
@@ -38,9 +38,9 @@ This is a **complete GitHub + Cloudflare Pages project**, forked directly from V
 ## Installation
 1. Back up the current GitHub repository. Extract this ZIP and upload its **contents**, not the ZIP, to your existing `athave-ai` repository on the `main` branch, overwriting prior files. Cloudflare Pages deployment stays build command `exit 0`, output directory `public`, framework None.
 2. Keep your configured production Cloudflare secrets intact. SEO does not need additional API keys.
-3. When the deploy succeeds, confirm `https://athave-ai.pages.dev/robots.txt`, `https://athave-ai.pages.dev/sitemap.xml`, homepage and `/solutions/`. Check `https://athave-ai.pages.dev/admin/` separately, but do not submit it for indexing.
-4. Open [Google Search Console](https://search.google.com/search-console/) and add a **URL-prefix property** for `https://athave-ai.pages.dev/` (or verify your real custom domain first). Use DNS or HTML tag verification as offered. Paste the provided Search Console meta verification tag into `public/index.html` if using tag method; Cloudflare redeploy is needed.
-5. Submit `https://athave-ai.pages.dev/sitemap.xml` in Search Console → Sitemaps, then inspect the home page, `/solutions/` and `/about/`. Indexing is not immediate or guaranteed.
+3. When the deploy succeeds, confirm `https://athave.in/robots.txt`, `https://athave.in/sitemap.xml`, homepage and `/solutions/`. Check `https://athave.in/admin/` separately, but do not submit it for indexing.
+4. Open [Google Search Console](https://search.google.com/search-console/) and add a **URL-prefix property** for `https://athave.in/` (or verify your real custom domain first). Use DNS or HTML tag verification as offered. Paste the provided Search Console meta verification tag into `public/index.html` if using tag method; Cloudflare redeploy is needed.
+5. Submit `https://athave.in/sitemap.xml` in Search Console → Sitemaps, then inspect the home page, `/solutions/` and `/about/`. Indexing is not immediate or guaranteed.
 6. Use Google [Rich Results Test](https://search.google.com/test/rich-results) and [PageSpeed Insights](https://pagespeed.web.dev/) for further validation. 
 
 ## How this SEO package works
@@ -52,7 +52,7 @@ This is a **complete GitHub + Cloudflare Pages project**, forked directly from V
 - SEO content uses consistent `Athave AI` branding. Avoid keyword stuffing, doorway pages, duplicate descriptions and deceptive JSON-LD; Google ignores the meta-keywords tag.
 
 ## Canonical domain (important)
-This package currently uses **https://athave-ai.pages.dev** because that is your established live domain. If you purchase and connect `athave.in` or another domain, **do not merely change links before DNS works**. Once it is live and verified, run `python tools/set_seo_domain.py https://YOUR-REAL-DOMAIN` to replace canonical links, Open Graph URLs and sitemap entries. Redirect the pages.dev hostname to the custom domain where possible, then verify the new Search Console property. DNS and registrar ownership are not established by this ZIP.
+This package currently uses **https://athave.in** because that is your established live domain. If you purchase and connect `athave.in` or another domain, **do not merely change links before DNS works**. Once it is live and verified, run `python tools/set_seo_domain.py https://YOUR-REAL-DOMAIN` to replace canonical links, Open Graph URLs and sitemap entries. Redirect the pages.dev hostname to the custom domain where possible, then verify the new Search Console property. DNS and registrar ownership are not established by this ZIP.
 
 ## Branded rankings
 Optimized SEO does not make any site automatically #1 for `Athave`, `Athave AI`, `athave.in`, 1,000 keywords or other broad searches. Brand uniqueness, consistent mentions, real backlinks, indexed pages and time matter. Build truthful brand links from your verified channels and your developer Quartz Web Solutions website. Search Console impressions and queries should guide which content to expand.
