@@ -75,8 +75,8 @@ async function showHero(){
  }catch{} // Default image remains available if custom settings could not be read.
 }
 async function loadGallery(){
- const sources={1:'/assets/athave-marble-showcase.webp',2:'/assets/athave-shirt.webp',3:'/assets/athave-earbuds-cutout.webp'};
- try{const gallery=await request('gallery');for(const item of gallery.images||[]){const pic=$('showcaseImg'+item.slot);if(pic)pic.src=item.imageUrl||sources[item.slot]}}catch{} // static images are the safe fallback
+ const sources={1:'/assets/athave-white-sneakers.webp',2:'/assets/athave-shirt.webp',3:'/assets/athave-earbuds-cutout.webp'};
+ try{const gallery=await request('gallery');for(const item of gallery.images||[]){const pic=$('showcaseImg'+item.slot);if(pic){pic.src=item.imageUrl||sources[item.slot];if(item.slot===1)pic.parentElement?.classList.toggle('m-showcase-default-cutout',!item.imageUrl)}}}catch{} // static images are the safe fallback
 }
 function date(d){return d?new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—'}
 async function initSession(){
@@ -144,10 +144,8 @@ async function uploadAll(){if(uploadBusy)return;
  if(!await signedInOrPrompt(uploadAll))return;
  if(!entitlement?.active||entitlement.remaining<1)return msg('Start your ₹499 monthly plan first.',true);
  if(uploadFiles.length>entitlement.remaining)return msg(`You have ${entitlement.remaining} uploads remaining. Upload fewer photos or add more after using your current allowance.`,true);
- const name=$('customerName').value.trim(),contact=$('customerContact').value.trim();if(name.length<2)return msg('Enter your name or shop name.',true);
  uploadBusy=true;$('sendUploads').disabled=true;let done=0;const total=uploadFiles.length;const progress=$('uploadProgress');progress.hidden=false;
  try{
-  await post('update-customer',{name,contact});customer.display_name=name;customer.contact=contact;
   const batch=crypto.randomUUID();let errors=[];
   for(const file of [...uploadFiles]){
    const f=new FormData();f.set('file',file);f.set('batch',batch);
@@ -201,7 +199,7 @@ async function boot(){
  }
  try{
   await initSession();
-  if(page==='create'){if(customer&&$('customerName')){$('customerName').value=customer.display_name.startsWith('Customer ')?'':customer.display_name;$('customerContact').value=customer.contact||''}await loadUploads()}
+  if(page==='create')await loadUploads()
   if(page==='profile')await loadUploads();
   if(page==='payments')await loadPayments();
  }catch(e){msg(e.message,true,page==='topup'?'paymentMessage':page==='profile'?'profileStatus':'uploadMessage')}

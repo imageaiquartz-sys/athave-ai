@@ -1,7 +1,7 @@
 /* Athave AI: sectioned private admin dashboard. API grants are checked server-side. */
 const $=id=>document.getElementById(id);
 let people=[], selectedCustomerId=null, busyDeliver=false, inflight=0;
-const fallbackGallery={1:'/assets/athave-marble-showcase.webp',2:'/assets/athave-shirt.webp',3:'/assets/athave-earbuds-cutout.webp'};
+const fallbackGallery={1:'/assets/athave-white-sneakers.webp',2:'/assets/athave-shirt.webp',3:'/assets/athave-earbuds-cutout.webp'};
 const note=(text='',error=false,target=$('adminNote'))=>{if(!target)return;target.textContent=text;target.classList.toggle('error',error)};
 const time=x=>x?new Date(x).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):'—';
 function busy(label='Loading…',start=true){inflight=Math.max(0,inflight+(start?1:-1));$('adminLoader').hidden=inflight===0;if(start)$('adminLoadingText').textContent=label;}
@@ -23,7 +23,7 @@ function renderStats(){const customers=people.length,uploads=people.reduce((n,p)
  $('statCustomers').textContent=String(customers);$('statUploads').textContent=String(uploads);$('statProcessing').textContent=String(processing);$('statCompleted').textContent=String(uploads-processing);$('tabProcessingCount').textContent=String(processing);
 }
 function renderCard(root,c){const card=document.createElement('button');card.type='button';card.className='admin-customer-card';card.setAttribute('aria-label','Open uploads for '+c.display_name);
- const top=document.createElement('div');top.className='admin-customer-top';const avatar=document.createElement('span');avatar.className='m-avatar';avatar.textContent=(c.display_name||'A')[0].toUpperCase();
+ const top=document.createElement('div');top.className='admin-customer-top';const avatar=document.createElement('span');avatar.className='m-avatar';const avatarImg=document.createElement('img');avatarImg.src='/assets/account-avatar.svg';avatarImg.alt='';avatarImg.width=30;avatarImg.height=30;avatarImg.setAttribute('aria-hidden','true');avatar.append(avatarImg);
  const desc=document.createElement('div');const title=document.createElement('strong');title.textContent=c.display_name||'Customer';const contact=document.createElement('small');contact.textContent=c.contact||'Athave customer';desc.append(title,contact);top.append(avatar,desc);
  const foot=document.createElement('div');foot.className='admin-card-counts';const total=document.createElement('span');total.textContent=(c.total||0)+' uploaded';const pending=document.createElement('strong');pending.className=c.processing?'admin-pending':'admin-clear';pending.textContent=c.processing?c.processing+' processing':'Up to date';foot.append(total,pending);
  card.append(top,foot);card.onclick=()=>openCustomer(c.id);root.append(card);

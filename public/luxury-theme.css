@@ -50,3 +50,23 @@ input:not([type=checkbox]):not([type=radio]):not([type=file]),textarea,select{ac
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important}}
 
 .admin-custom-file:has(+ input:focus-visible){outline:3px solid #c3a16f;outline-offset:3px}
+
+/* 2026-10-13 design refinements: one OTP phone outline, compact type, consistent icon avatars. */
+.m-auth-phone{transition:border-color .18s,box-shadow .18s}
+.m-auth-dialog .m-auth-phone input,
+.m-auth-dialog .m-auth-phone input:focus,
+.m-auth-dialog .m-auth-phone input:focus-visible{
+  display:block;width:100%;min-width:0;border:0!important;outline:0!important;box-shadow:none!important;
+  border-radius:0!important;background:transparent!important;appearance:none;padding-left:7px;
+}
+.m-auth-dialog .m-auth-phone:focus-within{
+  border-color:#bb9460;box-shadow:0 0 0 3px #cfad7d27;
+}
+.m-auth-phone>b{white-space:nowrap;flex:none;font-size:14px;font-weight:750}
+.m-avatar img{width:30px;height:30px;display:block;object-fit:contain;flex:none}
+.m-plan-promo h2{font-family:'Manrope','DM Sans',Arial,sans-serif;font-weight:800;letter-spacing:-.055em;font-size:clamp(26px,3vw,37px);line-height:1.17}
+.m-price-value{font-family:'Manrope','DM Sans',Arial,sans-serif;font-size:clamp(48px,5.2vw,59px);font-weight:800;letter-spacing:-.065em;font-variant-numeric:lining-nums tabular-nums;line-height:1.15}
+.m-price-value small{font-family:'Manrope','DM Sans',Arial,sans-serif;letter-spacing:0;font-weight:650;font-size:14px}
+.m-showcase-image.m-showcase-default-cutout{display:grid;place-items:center;background:radial-gradient(ellipse at 44% 28%,#fffdf8 4%,#f1e7d7 68%,#e5d3b8 100%)}
+.m-showcase-image.m-showcase-default-cutout img{object-fit:contain;object-position:center;padding:8px;filter:drop-shadow(0 16px 16px rgba(79,61,43,.12))}
+@media(max-width:540px){.m-plan-promo h2{font-size:clamp(26px,7.5vw,34px)}.m-showcase-image.m-showcase-default-cutout img{padding:4px}}

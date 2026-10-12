@@ -1,12 +1,13 @@
 /* Athave AI V14 cache refresh: public static files only.
    Never cache API results, authenticated pages, sessions, uploads or payment data. */
-const CACHE = 'athave-static-v18-luxury-20261013';
+const CACHE = 'athave-static-v19-showcase-ui-20261013';
 const STATIC = [
   '/offline.html', '/favicon.png', '/favicon-48.png', '/favicon.ico',
   '/styles.css', '/app.js', '/admin.js', '/manual.css', '/manual-app.js', '/manual-admin.css', '/manual-admin.js', '/luxury-theme.css', '/luxury-admin.css', '/pwa.js', '/manifest.webmanifest',
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-512.png',
   '/icons/apple-touch-icon.png', '/assets/unicorn-transparent.webp',
-  '/assets/athave-logo-official.webp', '/assets/athave-marble-showcase.webp'
+  '/assets/athave-logo-official.webp', '/assets/athave-marble-showcase.webp',
+  '/assets/athave-white-sneakers.webp', '/assets/account-avatar.svg'
 ];
 const ASSETS = new Set(STATIC);
 // Recheck core code and styles online, rather than trapping users on an old UI.
