@@ -1,7 +1,6 @@
 /* Athave AI: sectioned private admin dashboard. API grants are checked server-side. */
 const $=id=>document.getElementById(id);
 let people=[], selectedCustomerId=null, busyDeliver=false, inflight=0;
-const fallbackGallery={1:'/assets/athave-white-sneakers.webp',2:'/assets/athave-shirt.webp',3:'/assets/athave-earbuds-cutout.webp'};
 const note=(text='',error=false,target=$('adminNote'))=>{if(!target)return;target.textContent=text;target.classList.toggle('error',error)};
 const time=x=>x?new Date(x).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):'—';
 function busy(label='Loading…',start=true){inflight=Math.max(0,inflight+(start?1:-1));$('adminLoader').hidden=inflight===0;if(start)$('adminLoadingText').textContent=label;}
@@ -13,7 +12,7 @@ async function req(path,options={}){
 const post=(path,body)=>req(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
 const imageSrc=(kind,id)=>'/api/manual/admin/file?kind='+encodeURIComponent(kind)+'&id='+encodeURIComponent(id);
 function unlocked(yes){$('unlockPanel').hidden=yes;$('adminWorkspace').hidden=!yes;$('adminLock').hidden=!yes;if(yes)changeTab('overview')}
-function changeTab(tab){const good=['overview','uploads','customers','images','settings'];if(!good.includes(tab))return;
+function changeTab(tab){const good=['overview','uploads','customers','settings'];if(!good.includes(tab))return;
  for(const item of good){const active=item===tab;$('tab-'+item).hidden=!active;const button=document.querySelector('[data-tab="'+item+'"]');button.classList.toggle('is-active',active);button.setAttribute('aria-selected',String(active))}
  const url=new URL(location.href);url.hash=tab==='overview'?'':tab;history.replaceState(null,'',url);
 }
@@ -68,24 +67,7 @@ $('closeDetail').onclick=()=>{$('customerDetail').hidden=true;selectedCustomerId
 $('refreshAdmin').onclick=async()=>{try{await loadCustomers();if(selectedCustomerId)await openCustomer(selectedCustomerId,{scroll:false})}catch(e){note(e.message,true)}};
 $('refreshOverview').onclick=()=>loadCustomers().catch(e=>note(e.message,true));
 $('searchCustomers').oninput=renderCustomers;$('searchAllCustomers').oninput=renderCustomers;$('uploadFilter').onchange=renderCustomers;
-// Hero appearance editor (keeps the existing V17 secure hero endpoint).
-async function loadHeroAdmin(){try{const setting=await req('manual/admin/hero');$('heroMode').value=setting.mode||'default';$('heroPreview').src=setting.imageUrl||'/assets/athave-marble-showcase.webp';$('heroPreview').classList.toggle('cutout',setting.mode==='transparent')}catch(e){note(e.message,true,$('heroAdminStatus'))}}
-function updateLocalImage(input,preview,fileText){const file=input.files[0];if(!file)return;fileText.textContent=file.name;const url=URL.createObjectURL(file);preview.onload=()=>URL.revokeObjectURL(url);preview.src=url}
-$('heroInput').onchange=()=>updateLocalImage($('heroInput'),$('heroPreview'),$('heroFileName'));
-$('heroMode').onchange=()=>{$('heroPreview').classList.toggle('cutout',$('heroMode').value==='transparent');const off=$('heroMode').value==='default';$('heroInput').disabled=off;$('heroInput').closest('.admin-image-editor').classList.toggle('is-reset',off)};
-$('heroForm').onsubmit=async e=>{e.preventDefault();const mode=$('heroMode').value,file=$('heroInput').files[0],button=e.currentTarget.querySelector('[type=submit]');if(mode!=='default'&&!file)return note('Select an image first.',true,$('heroAdminStatus'));
- button.disabled=true;try{const form=new FormData();form.set('mode',mode);if(file)form.set('file',file);await req('manual/admin/hero',{method:'POST',body:form});$('heroInput').value='';$('heroFileName').textContent='JPG, PNG or WebP · Up to 8 MB';await loadHeroAdmin();note('Homepage artwork updated.',false,$('heroAdminStatus'))}catch(e){note(e.message,true,$('heroAdminStatus'))}finally{button.disabled=false}
-};
-// Gallery editor: independent slot controls, saved to the same private bucket.
-async function loadGalleryAdmin(){try{const data=await req('manual/admin/gallery');for(const item of data.images||[]){const node=$('galleryPreview'+item.slot);if(node)node.src=item.imageUrl||fallbackGallery[item.slot]}}catch(e){for(let n=1;n<=3;n++)note(e.message,true,$('galleryStatus'+n))}}
-for(let slot=1;slot<=3;slot++){
- const input=$('galleryFile'+slot);input.onchange=()=>updateLocalImage(input,$('galleryPreview'+slot),$('galleryFileName'+slot));
- const form=document.querySelector('.gallery-form[data-slot="'+slot+'"]');form.onsubmit=async e=>{e.preventDefault();const file=input.files[0],button=e.currentTarget.querySelector('[type=submit]');if(!file)return note('Choose an image.',true,$('galleryStatus'+slot));button.disabled=true;
-  try{const body=new FormData();body.set('slot',String(slot));body.set('mode','replace');body.set('file',file);await req('manual/admin/gallery',{method:'POST',body});input.value='';$('galleryFileName'+slot).textContent='JPG, PNG or WebP';await loadGalleryAdmin();note('Showcase image saved.',false,$('galleryStatus'+slot))}catch(err){note(err.message,true,$('galleryStatus'+slot))}finally{button.disabled=false}
- };
- document.querySelector('[data-reset="'+slot+'"]').onclick=async()=>{if(!confirm('Restore the original showcase image?'))return;try{const body=new FormData();body.set('slot',String(slot));body.set('mode','default');await req('manual/admin/gallery',{method:'POST',body});await loadGalleryAdmin();note('Original image restored.',false,$('galleryStatus'+slot))}catch(e){note(e.message,true,$('galleryStatus'+slot))}};
-}
-async function initialize(){const state=await req('admin/status');unlocked(state.unlocked);if(state.unlocked){await Promise.all([loadCustomers(),loadHeroAdmin(),loadGalleryAdmin()]);const wanted=location.hash.slice(1);if(['overview','uploads','customers','images','settings'].includes(wanted))changeTab(wanted)}else if(!state.configured)note('Configure ADMIN_ACCESS_ID and SESSION_SECRET in Cloudflare first.',true)}
-$('unlockForm').onsubmit=async e=>{e.preventDefault();const b=e.currentTarget.querySelector('[type=submit]'),id=$('adminId').value.trim();b.disabled=true;try{await post('admin/login',{id});$('adminId').value='';unlocked(true);await Promise.all([loadCustomers(),loadHeroAdmin(),loadGalleryAdmin()]);note('Dashboard unlocked.')}catch(ex){note(ex.message,true,$('unlockError'))}finally{b.disabled=false}};
+async function initialize(){const state=await req('admin/status');unlocked(state.unlocked);if(state.unlocked){await loadCustomers();const wanted=location.hash.slice(1);if(['overview','uploads','customers','settings'].includes(wanted))changeTab(wanted)}else if(!state.configured)note('Configure ADMIN_ACCESS_ID and SESSION_SECRET in Cloudflare first.',true)}
+$('unlockForm').onsubmit=async e=>{e.preventDefault();const b=e.currentTarget.querySelector('[type=submit]'),id=$('adminId').value.trim();b.disabled=true;try{await post('admin/login',{id});$('adminId').value='';unlocked(true);await loadCustomers();note('Dashboard unlocked.')}catch(ex){note(ex.message,true,$('unlockError'))}finally{b.disabled=false}};
 $('adminLock').onclick=async()=>{try{await post('admin/logout',{});}catch{}unlocked(false);people=[];selectedCustomerId=null;note('Admin locked.')};
 initialize().catch(e=>{unlocked(false);note(e.message,true)});

@@ -4,6 +4,11 @@ const API='/api/manual/';
 const page=document.body.dataset.page;
 let customer=null, entitlement=null, uploadFiles=[], uploadBusy=false, aiFiles=[], aiMessages=[];
 let authUser=null, authAfter=null, authOpen=false, authPendingPhone='', checkoutBusy=false;
+const CACHE_KEYS={auth:'athave_auth_cache_v1',session:'athave_session_cache_v1'};
+const readCache=key=>{try{return JSON.parse(localStorage.getItem(key)||'null')}catch{return null}};
+const writeCache=(key,val)=>{try{localStorage.setItem(key,JSON.stringify(val))}catch{}};
+const clearCache=key=>{try{localStorage.removeItem(key)}catch{}};
+function hydrateCachedState(){const a=readCache(CACHE_KEYS.auth),s=readCache(CACHE_KEYS.session); if(a&&a.user){authUser=a.user;} if(s){customer=s.customer||customer; entitlement=s.entitlement||entitlement;}}
 const msg=(message,error=false,id='uploadMessage')=>{const node=$(id)||$('appToast');if(!node)return;node.textContent=message;node.classList.toggle('error',error);node.hidden=false};
 let loadingRequests=0;
 function loadingVisual(active){
@@ -47,14 +52,14 @@ async function authAction(path,body,formId,done){
 function openAuth(after){authOverlay();if(typeof after==='function')authAfter=after;authOpen=true;$('athaveOtpOverlay').hidden=false;showAuthStep('mPhoneForm');authMessage('');setTimeout(()=>$('mPhone')?.focus(),30)}
 function closeAuth(){if(!authOpen)return;authOpen=false;$('athaveOtpOverlay').hidden=true;authAfter=null}
 async function getAuth(){
- try{const r=await fetch('/api/auth/session',{credentials:'same-origin',cache:'no-store'});if(!r.ok){authUser=null;return null}authUser=await r.json();return authUser}catch{authUser=null;return null}
+ try{const r=await fetch('/api/auth/session',{credentials:'same-origin',cache:'no-store'});if(!r.ok){authUser=null;clearCache(CACHE_KEYS.auth);return null}authUser=await r.json();writeCache(CACHE_KEYS.auth,{user:authUser,ts:Date.now()});return authUser}catch{authUser=null;clearCache(CACHE_KEYS.auth);return null}
 }
 async function authSuccess(){
  const old=authAfter;authAfter=null;authOpen=false;$('athaveOtpOverlay').hidden=true;
  await getAuth();await boot();if(old)await old();
 }
 async function signOut(){
- try{await postPublic('auth/logout',{});authUser=null;customer=null;entitlement=null;uploadFiles=[];if($('allUploads'))$('allUploads').replaceChildren();updateProfileAuth();location.href='/profile/'}catch(e){msg(e.message,true,'profileStatus')}
+ try{await postPublic('auth/logout',{});authUser=null;customer=null;entitlement=null;clearCache(CACHE_KEYS.auth);clearCache(CACHE_KEYS.session);uploadFiles=[];if($('allUploads'))$('allUploads').replaceChildren();updateProfileAuth();location.href='/profile/'}catch(e){msg(e.message,true,'profileStatus')}
 }
 async function postPublic(path,data){const r=await fetch('/api/'+path,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(data)});const j=await r.json().catch(()=>({}));if(!r.ok)throw Error(j.error||'Request failed');return j}
 async function signedInOrPrompt(action){if(authUser||await getAuth())return true;openAuth(action);return false}
@@ -69,19 +74,23 @@ function updateProfileAuth(){
 }
 async function showHero(){
  const root=$('homepageArt');if(!root)return;
- try{const setting=await request('hero');const pic=$('homepageImage');root.classList.toggle('m-with-background',setting.mode==='background');root.classList.toggle('m-transparent-image',setting.mode==='transparent');
-  const isDefault=setting.mode==='default';root.classList.toggle('m-with-background',isDefault||setting.mode==='background');
-  pic.src=setting.imageUrl||'/assets/athave-marble-showcase.webp';pic.alt='Athave AI luxury product catalogue image';
- }catch{} // Default image remains available if custom settings could not be read.
+ const pic=$('homepageImage');
+ root.classList.add('m-transparent-image');
+ root.classList.remove('m-with-background');
+ pic.src='/assets/athave-white-sneakers.webp';
+ pic.alt='Athave AI branded white sneakers shown on a luxury showcase background';
+ const cap=$('homepageCaption'); if(cap) cap.textContent='LUXURY PRODUCT VISUALS';
 }
 async function loadGallery(){
- const sources={1:'/assets/athave-white-sneakers.webp',2:'/assets/athave-shirt.webp',3:'/assets/athave-earbuds-cutout.webp'};
- try{const gallery=await request('gallery');for(const item of gallery.images||[]){const pic=$('showcaseImg'+item.slot);if(pic){pic.src=item.imageUrl||sources[item.slot];if(item.slot===1)pic.parentElement?.classList.toggle('m-showcase-default-cutout',!item.imageUrl)}}}catch{} // static images are the safe fallback
+ const refs={1:'/assets/athave-white-sneakers.webp',2:'/assets/athave-shirt.webp',3:'/assets/athave-earbuds-cutout.webp'};
+ for(const slot of [1,2,3]){const pic=$('showcaseImg'+slot); if(pic) pic.src=refs[slot];}
+ const feature=$('showcaseImg1')?.parentElement; if(feature){feature.classList.add('m-stone-image','m-showcase-fullview'); feature.classList.remove('m-showcase-default-cutout');}
 }
 function date(d){return d?new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—'}
 async function initSession(){
  const fresh=await post('start',{});
  customer=fresh.customer;entitlement=fresh.entitlement;
+ writeCache(CACHE_KEYS.session,{customer,entitlement,ts:Date.now()});
  renderPlan();updateProfileAuth();
  return fresh;
 }
@@ -190,7 +199,10 @@ async function aiSend(){const button=$('aiSend'),input=$('aiPrompt'),message=inp
  }catch(e){waiting.remove();aiLine('assistant','Request failed: '+e.message);msg(e.message,true,'aiMessage')}finally{button.disabled=false;input.focus()}
 }
 async function boot(){
- if(page==='home'){await Promise.allSettled([showHero(),loadGallery()]);return}
+ hydrateCachedState();
+ updateProfileAuth();
+ if(customer||entitlement) renderPlan();
+ if(page==='home'){await Promise.allSettled([showHero(),loadGallery(),getAuth().catch(()=>null)]);updateProfileAuth();return}
  await getAuth();updateProfileAuth();
  if(!authUser){
   customer=null;entitlement=null;renderPlan();

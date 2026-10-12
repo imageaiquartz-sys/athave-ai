@@ -6,42 +6,52 @@
 
 /admin/*
   X-Robots-Tag: noindex, nofollow, noarchive
+
 /profile/*
   X-Robots-Tag: noindex, nofollow, noarchive
+
 /results/*
   X-Robots-Tag: noindex, nofollow, noarchive
 
-/sw.js
-  Cache-Control: no-cache, no-store, must-revalidate
-/manifest.webmanifest
-  Content-Type: application/manifest+json
-  Cache-Control: no-cache
 /api/*
   Cache-Control: no-store
 
-/favicon.png
-  Cache-Control: public, max-age=86400
-/favicon-48.png
-  Cache-Control: public, max-age=86400
-/favicon.ico
-  Cache-Control: public, max-age=86400
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
 
-/styles.css
-  Cache-Control: no-cache, must-revalidate
 /pwa.js
-  Cache-Control: no-cache, must-revalidate
-/app.js
-  Cache-Control: no-cache, must-revalidate
-/admin.js
   Cache-Control: no-cache, must-revalidate
 
 /manual.css
   Cache-Control: no-cache, must-revalidate
+
 /manual-app.js
   Cache-Control: no-cache, must-revalidate
+
 /manual-admin.css
   Cache-Control: no-cache, must-revalidate
+
 /manual-admin.js
   Cache-Control: no-cache, must-revalidate
+
+/luxury-theme.css
+  Cache-Control: no-cache, must-revalidate
+
+/luxury-admin.css
+  Cache-Control: no-cache, must-revalidate
+
+/manifest.webmanifest
+  Content-Type: application/manifest+json
+  Cache-Control: no-cache
+
+/favicon.png
+  Cache-Control: public, max-age=86400
+
+/favicon-48.png
+  Cache-Control: public, max-age=86400
+
+/favicon.ico
+  Cache-Control: public, max-age=86400
+
 /ai/*
   Cache-Control: no-cache, must-revalidate
