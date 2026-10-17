@@ -242,3 +242,18 @@ body[data-page="ai"] .m-ai-page{padding-bottom:max(18px,env(safe-area-inset-bott
 body[data-page="ai"] .m-ai-mini-note{margin:3px 0 2px!important;padding:0 4px;line-height:16px!important;min-height:16px}
 @media(max-width:700px){body[data-page="ai"] .m-ai-page{padding-bottom:max(22px,env(safe-area-inset-bottom) + 14px)!important;gap:6px!important}}
 @media(max-height:480px){body[data-page="ai"] .m-ai-page{padding-bottom:max(10px,env(safe-area-inset-bottom) + 5px)!important}}
+
+
+/* V26: Explicit label elements prevent the Gallery bullet collapsing into its text.
+   Keep the dot + label centered together in each of the four equal mobile columns. */
+.m-links a{display:inline-flex!important;flex-direction:row!important;align-items:center!important;justify-content:center!important;column-gap:11px!important}
+.m-links a::before{display:block!important;position:static!important;margin:0!important;flex:0 0 5px!important;width:5px!important;height:5px!important}
+.m-links a>.m-nav-label{display:inline-block!important;flex:0 0 auto!important;min-width:max-content;white-space:nowrap}
+@media(max-width:700px){
+ .m-links a{column-gap:10px!important;min-width:0!important}
+ .m-links a::before{flex-basis:4px!important;width:4px!important;height:4px!important}
+}
+@media(max-width:360px){.m-links a{column-gap:8px!important;font-size:11px!important}}
+/* The older 430px breakpoint gave only the third tab display:block!important,
+   which overrode flex gap and caused the Gallery bullet to sit above/against its label. */
+@media(max-width:700px){.m-links a:nth-child(3){display:inline-flex!important;align-items:center!important;justify-content:center!important}}

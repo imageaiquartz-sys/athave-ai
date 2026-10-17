@@ -105,7 +105,15 @@ async function supa(env,method,relative,body=null,opts={}){
  if(body!==null&&!opts.raw)headers['content-type']='application/json';
  let r=await fetch(url,{method,headers,body:body===null?undefined:(opts.raw?body:JSON.stringify(body))});
  if(opts.response)return r;
- if(!r.ok){let message=(await r.text()).slice(0,260);throw Error(`Database operation failed: ${r.status} ${message}`)}
+ if(!r.ok){
+  const message=(await r.text()).slice(0,600);
+  // V26: the recurring-billing SQL is a required deployment migration. Do not
+  // leak PostgREST internals to customers or conceal a broken payment schema.
+  if(r.status===404&&/\"code\"\s*:\s*\"PGRST205\"/.test(message)&&
+     /public\.manual_subscriptions|public\.manual_subscription_charges/.test(message))
+   throw Error('Subscription setup pending: an administrator must run the V24 Razorpay SQL migration in Supabase.');
+  throw Error(`Database operation failed: ${r.status} ${message.slice(0,260)}`);
+ }
  const raw=await r.text();return raw?JSON.parse(raw):null;
 }
 const tbl=(env,method,table,query='',data=null,opts={})=>supa(env,method,'/rest/v1/'+table+query,data,opts);
@@ -148,7 +156,7 @@ async function gemini(env,parts,model,config){
  }finally{clearTimeout(t)}
 }
 async function getHistory(env,id){let jobs=await tbl(env,'GET','jobs',`?customer_id=eq.${id}&select=id,kind,side,status,created_at,storage_path&order=created_at.desc&limit=24`);return jobs||[]}
-function errorResponse(ex){const msg=String(ex.message||ex).slice(0,220);console.error('Athave API:',msg);return err(msg,(/not configured|disabled|site-wide/.test(msg)?503:400))}
+function errorResponse(ex){const msg=String(ex.message||ex).slice(0,220);console.error('Athave API:',msg);return err(msg,(/not configured|disabled|site-wide|Subscription setup pending/.test(msg)?503:400))}
 export async function onRequest({request,env,params}){
  try{
   const pathname=new URL(request.url).pathname;
@@ -512,9 +520,16 @@ async function manualFileFromStorage(env,path,mime,downloadName=''){
 const SUBSCRIPTION_AMOUNT=69900;
 const SUB_ID=/^sub_[A-Za-z0-9]{6,60}$/;
 const PAY_ID=/^pay_[A-Za-z0-9]{6,60}$/;
-async function manualCurrentSubscription(env,customerId){
- const rows=await tbl(env,'GET','manual_subscriptions',`?customer_id=eq.${encodeURIComponent(customerId)}&select=*&order=created_at.desc&limit=1`);
- return rows?.[0]||null;
+async function manualCurrentSubscription(env,customerId,{required=false}={}){
+ try{
+  const rows=await tbl(env,'GET','manual_subscriptions',`?customer_id=eq.${encodeURIComponent(customerId)}&select=*&order=created_at.desc&limit=1`);
+  return rows?.[0]||null;
+ }catch(ex){
+  // Account and Studio may still open before the V24 database migration.
+  // Subscription actions use required:true and NEVER proceed if it is missing.
+  if(!required&&String(ex?.message||'').startsWith('Subscription setup pending:'))return null;
+  throw ex;
+ }
 }
 function manualSubscriptionPublic(s){return s?{id:s.gateway_subscription_id,status:s.status,cancelAtCycleEnd:!!s.cancel_at_cycle_end}:null}
 async function manualSyncSubscription(env,sub){
@@ -716,7 +731,9 @@ async function handleManual(req,env,isAdmin){
   if(env.PAYMENTS_ENABLED!=='true'||!env.RAZORPAY_KEY_ID||!env.RAZORPAY_KEY_SECRET||!env.RAZORPAY_WEBHOOK_SECRET||!env.RAZORPAY_SUBSCRIPTION_PLAN_ID)return err('Subscription payments are not yet configured',503);
   const entitlement=await guestEntitlement(env,user.id);
   if(entitlement.active)return err('Your paid plan is already active. Manage your renewal instead.');
-  let existing=await manualCurrentSubscription(env,user.id);
+  let existing=await manualCurrentSubscription(env,user.id,{required:true});
+  // Never create a real Razorpay mandate if the charge ledger has not been installed.
+  await tbl(env,'GET','manual_subscription_charges','?select=id&limit=0');
   if(existing&&['created','authenticated','active','pending','halted','paused'].includes(existing.status)){
    // Prevent two recurring mandates for the same customer.
    const remote=await manualReconcileSubscription(env,existing.gateway_subscription_id);
@@ -741,14 +758,14 @@ async function handleManual(req,env,isAdmin){
   return json({verified:true,status:sub.status,entitlement:await guestEntitlement(env,user.id)});
  }
  if(route==='subscription/status'&&method==='GET'){
-  const sub=await manualCurrentSubscription(env,user.id);
+  const sub=await manualCurrentSubscription(env,user.id,{required:true});
   if(!sub)return json({subscription:null,entitlement:await guestEntitlement(env,user.id)});
   // A small, authenticated status check; charged entitlements are granted by signed webhooks.
   const remote=env.RAZORPAY_KEY_ID&&env.RAZORPAY_KEY_SECRET?await manualReconcileSubscription(env,sub.gateway_subscription_id):null;
   return json({subscription:manualSubscriptionPublic({...sub,status:remote?.status||sub.status}),entitlement:await guestEntitlement(env,user.id)});
  }
  if(route==='subscription/cancel'&&method==='POST'){
-  const sub=await manualCurrentSubscription(env,user.id);
+  const sub=await manualCurrentSubscription(env,user.id,{required:true});
   if(!sub||!['created','authenticated','active','pending','halted','paused'].includes(sub.status))return err('There is no subscription to cancel');
   if(sub.cancel_at_cycle_end)return json({cancelled:true,atCycleEnd:true});
   const active=await guestEntitlement(env,user.id);

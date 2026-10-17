@@ -409,6 +409,8 @@ async function boot({verified=false}={}){
  }
  try{
   await initSession();
+  // Billing setup is checked only in Plans, not on every AI Studio opening.
+  if(page==='topup')await checkSubscription();
   if(page==='create')await loadUploads();
   if(page==='gallery')await loadCustomerGallery(true)
   if(page==='profile')await loadUploads();
