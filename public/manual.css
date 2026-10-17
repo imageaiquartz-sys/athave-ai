@@ -18,3 +18,9 @@
 .m-payments-list{margin-top:16px}.m-payment-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 0;border-bottom:1px solid #edf0f4}.m-payment-row>div{display:grid;gap:5px}.m-payment-row small{color:#687180}.m-payment-right{text-align:right}
 
 .m-verified{border:0;cursor:pointer}.m-verified:disabled{cursor:default}
+
+/* V24: single recurring subscription card */
+.m-single-plan{grid-template-columns:minmax(0,580px);justify-content:center}
+.m-single-plan .m-price p{min-height:0}
+#subscriptionState{margin-top:9px;color:#575f6e;font-size:13px}
+#cancelSubscription{margin-top:4px}

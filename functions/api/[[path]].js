@@ -159,7 +159,7 @@ export async function onRequest({request,env,params}){
     const origin=request.headers.get('Origin');const expected=new URL(request.url).origin;
     if(origin!==expected)return err('Invalid request origin',403);
   }
-  if(method==='GET'&&route==='config')return json({brand:'Athave AI',login:!!(env.MSG91_WIDGET_ID&&env.MSG91_AUTH_KEY&&env.SESSION_SECRET&&env.SUPABASE_URL&&env.SUPABASE_SERVICE_ROLE_KEY),payments:env.PAYMENTS_ENABLED==='true'&&!!(env.RAZORPAY_KEY_ID&&env.RAZORPAY_KEY_SECRET&&env.RAZORPAY_WEBHOOK_SECRET),ai:!!env.GEMINI_API_KEY,otpMode:'server'});
+  if(method==='GET'&&route==='config')return json({brand:'Athave AI',login:!!(env.MSG91_WIDGET_ID&&env.MSG91_AUTH_KEY&&env.SESSION_SECRET&&env.SUPABASE_URL&&env.SUPABASE_SERVICE_ROLE_KEY),payments:env.PAYMENTS_ENABLED==='true'&&!!(env.RAZORPAY_KEY_ID&&env.RAZORPAY_KEY_SECRET&&env.RAZORPAY_WEBHOOK_SECRET&&env.RAZORPAY_SUBSCRIPTION_PLAN_ID),ai:!!env.GEMINI_API_KEY,otpMode:'server'});
   if(method==='POST'&&route==='webhooks/razorpay'){
    const raw=await request.text(),sig=request.headers.get('x-razorpay-signature')||'';
    if(!env.RAZORPAY_WEBHOOK_SECRET)return err('Webhook secret required',503);
@@ -167,8 +167,30 @@ export async function onRequest({request,env,params}){
    const event=JSON.parse(raw);
    if(event.event==='payment.captured'){
      const payment=event.payload?.payment?.entity;
-     if(payment?.order_id&&payment.id){if(!await manualCapture(env,payment.order_id,payment.id))await fulfill(env,payment.order_id,payment.id);}
+     if(payment?.order_id&&payment.id){
+       try{
+         const oldManual=await tbl(env,'GET','manual_payments',`?gateway_order_id=eq.${encodeURIComponent(payment.order_id)}&select=id&limit=1`);
+         if(oldManual?.length)await manualCapture(env,payment.order_id,payment.id);
+         else {
+           const oldWallet=await tbl(env,'GET','payments',`?gateway_order_id=eq.${encodeURIComponent(payment.order_id)}&select=id&limit=1`);
+           if(oldWallet?.length)await fulfill(env,payment.order_id,payment.id);
+         }
+       }catch(e){console.warn('Outstanding legacy order reconciliation failed',String(e?.message||e).slice(0,120));return err('Retry legacy payment webhook',503)}
+     }
+   } else if(event.event==='subscription.charged'){
+     const sub=event.payload?.subscription?.entity,payment=event.payload?.payment?.entity;
+     try{await manualApplySubscriptionCharge(env,sub,payment)}
+     catch(e){console.error('Subscription webhook failed',String(e?.message||e).slice(0,180));return err('Subscription reconciliation failed; retry',503)}
+   } else if(event.event.startsWith('subscription.')){
+     const sub=event.payload?.subscription?.entity;
+     if(sub?.id&&/^sub_[A-Za-z0-9]+$/.test(sub.id)){
+       const valid=['authenticated','activated','pending','halted','cancelled','paused','resumed','completed','updated','expired'];
+       if(valid.includes(event.event.slice('subscription.'.length))){
+         try{await manualSyncSubscription(env,sub)}catch(e){console.warn('Subscription status update deferred',String(e?.message||e).slice(0,130));return err('Subscription status reconciliation failed; retry',503)}
+       }
+     }
    }
+   // Old pending payments remain reconcilable, but no new one-time order can be purchased.
    return json({ok:true});
   }
   if(route.startsWith('manual/'))return await handleManual(request,env,await hasAdminSession(request,env));
@@ -215,7 +237,7 @@ export async function onRequest({request,env,params}){
   }
   if(method==='GET'&&route==='auth/session'){
     const user=await current(request,env);
-    return user?json({authenticated:true,name:user.name,phoneLast4:user.phone.slice(-4)}):json({authenticated:false},401);
+    return user?json({authenticated:true,id:user.id,name:user.name,phoneLast4:user.phone.slice(-4)}):json({authenticated:false},401);
   }
   if(method==='POST'&&route==='auth/logout'){
     const response=json({ok:true});
@@ -343,16 +365,7 @@ export async function onRequest({request,env,params}){
     await tbl(env,'PATCH','jobs',`?id=eq.${id}&customer_id=eq.${user.id}`,{storage_path:key});
     return json({ok:true});
   }
-  if(method==='POST'&&route==='payments/order'){
-    if(env.PAYMENTS_ENABLED!=='true'||!env.RAZORPAY_KEY_ID||!env.RAZORPAY_KEY_SECRET||!env.RAZORPAY_WEBHOOK_SECRET)return err('Payments are temporarily unavailable while Razorpay setup is completed.',503);
-    let d=await request.json(),plan=String(d.plan||'');if(!['starter','premium','custom'].includes(plan))return err('Invalid plan');
-    let amount=plan==='starter'?499:plan==='premium'?999:Number(d.amount);
-    if(!Number.isInteger(amount)||amount<100||amount>10000)return err('Custom amount must be ₹100–₹10,000');
-    let credits=plan==='starter'?30:plan==='premium'?60:rup(amount);if(credits<1)return err('Amount too low');
-    const order=await secureGateway(env,'POST','orders',{amount:amount*100,currency:'INR',receipt:crypto.randomUUID().replace(/-/g,'').slice(0,32)});
-    await tbl(env,'POST','payments','',{customer_id:user.id,plan,amount_paise:amount*100,credits,gateway_order_id:order.id},{headers:{prefer:'return=minimal'}});
-    return json({orderId:order.id,amount:amount*100,keyId:env.RAZORPAY_KEY_ID});
-  }
+  if(method==='POST'&&route==='payments/order')return err('One-time top-ups are discontinued. Please use the ₹699 monthly subscription.',410);
   if(method==='GET'&&route==='payments/status'){
     const oid=new URL(request.url).searchParams.get('orderId')||'';
     if(!/^order_[A-Za-z0-9]{6,60}$/.test(oid))return err('Invalid payment order');
@@ -464,11 +477,21 @@ async function guestEntitlement(env,guestId){
  if(complimentary)return {active:true,kind:'admin',freeAccess:true,periodEnd:null,uploadCap:null,used:null,remaining:null};
  return {active:paidActive,kind:paidActive?'paid':'none',freeAccess:false,periodEnd:paidActive?membership.period_end:null,uploadCap:paidActive?membership.upload_cap:0,used:paidActive?membership.used:0,remaining:paidActive?Math.max(0,membership.upload_cap-membership.used):0};
 }
-async function manualUploadList(env,guestId){
- const uploads=await tbl(env,'GET','manual_uploads',`?customer_id=eq.${guestId}&status=neq.uploading&select=id,batch_id,filename,status,created_at&order=created_at.desc&limit=300`);
+async function manualUploadList(env,guestId,{since=null}={}){
+ const delta=since?`&updated_at=gte.${encodeURIComponent(since)}`:'';
+ const uploads=await tbl(env,'GET','manual_uploads',`?customer_id=eq.${encodeURIComponent(guestId)}&status=neq.uploading${delta}&select=id,batch_id,filename,status,created_at,updated_at&order=created_at.desc&limit=300`);
  if(!uploads?.length)return [];
  const ids=uploads.map(x=>x.id).join(',');const results=await tbl(env,'GET','manual_outputs',`?upload_id=in.(${ids})&select=id,upload_id,filename,created_at&order=created_at.desc&limit=500`);
  return uploads.map(x=>({...x,deliveries:results.filter(y=>y.upload_id===x.id).map(({id,filename,created_at})=>({id,filename,created_at}))}));
+}
+async function manualCollectionVersion(env,table,where,field){
+ // PostgREST supplies exact count in the header while the body contains at most one record.
+ const response=await tbl(env,'GET',table,`${where}&select=id,${field}&order=${field}.desc,id.desc&limit=1`,null,{headers:{Prefer:'count=exact'},response:true});
+ if(!response.ok)throw Error('Unable to check collection version');
+ const rows=await response.json(),range=response.headers.get('content-range')||'';
+ const count=Number(range.split('/')[1]);
+ const newest=rows?.[0]||null;
+ return {revision:newest?newest.id+':'+newest[field]:'empty',latestUpdatedAt:newest?.[field]||null,count:Number.isInteger(count)?count:null};
 }
 function validManualImage(file,maxBytes){
  if(!file||typeof file.arrayBuffer!=='function')throw Error('Choose an image file');
@@ -484,6 +507,39 @@ async function manualFileFromStorage(env,path,mime,downloadName=''){
  const headers={'content-type':mime||r.headers.get('content-type')||'image/jpeg','cache-control':'private, no-store','x-content-type-options':'nosniff'};
  if(downloadName)headers['content-disposition']=`attachment; filename="${downloadName.replace(/[^a-zA-Z0-9._-]/g,'_')}"`;
  return new Response(r.body,{status:200,headers});
+}
+// Razorpay ₹699/month recurring subscription. Secrets never leave Cloudflare Pages.
+const SUBSCRIPTION_AMOUNT=69900;
+const SUB_ID=/^sub_[A-Za-z0-9]{6,60}$/;
+const PAY_ID=/^pay_[A-Za-z0-9]{6,60}$/;
+async function manualCurrentSubscription(env,customerId){
+ const rows=await tbl(env,'GET','manual_subscriptions',`?customer_id=eq.${encodeURIComponent(customerId)}&select=*&order=created_at.desc&limit=1`);
+ return rows?.[0]||null;
+}
+function manualSubscriptionPublic(s){return s?{id:s.gateway_subscription_id,status:s.status,cancelAtCycleEnd:!!s.cancel_at_cycle_end}:null}
+async function manualSyncSubscription(env,sub){
+ if(!SUB_ID.test(sub?.id||'')||sub.plan_id!==env.RAZORPAY_SUBSCRIPTION_PLAN_ID)return;
+ const map={created:'created',authenticated:'authenticated',active:'active',pending:'pending',halted:'halted',cancelled:'cancelled',completed:'completed',expired:'expired',paused:'paused'};
+ if(!map[sub.status])return;
+ await tbl(env,'PATCH','manual_subscriptions',`?gateway_subscription_id=eq.${encodeURIComponent(sub.id)}&plan_id=eq.${encodeURIComponent(sub.plan_id)}`,
+  {status:sub.status,updated_at:new Date().toISOString()},{headers:{prefer:'return=minimal'}});
+}
+async function manualApplySubscriptionCharge(env,sub,payment){
+ if(!SUB_ID.test(sub?.id||'')||sub.plan_id!==env.RAZORPAY_SUBSCRIPTION_PLAN_ID)throw Error('Invalid subscription plan');
+ if(!PAY_ID.test(payment?.id||'')||payment.status!=='captured'||payment.currency!=='INR'||Number(payment.amount)!==SUBSCRIPTION_AMOUNT)throw Error('Not a captured ₹699 subscription charge');
+ const start=Number(sub.current_start),end=Number(sub.current_end);
+ if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||end<=start||end-start>35*86400||end-start<25*86400)throw Error('Invalid monthly billing period');
+ await rpc(env,'manual_apply_subscription_charge',{p_subscription:sub.id,p_gateway_payment:payment.id,p_period_start:start,p_period_end:end});
+ await manualSyncSubscription(env,sub);
+}
+async function manualReconcileSubscription(env,subscriptionId){
+ if(!SUB_ID.test(subscriptionId))throw Error('Invalid subscription');
+ const sub=await secureGateway(env,'GET','subscriptions/'+encodeURIComponent(subscriptionId));
+ if(sub.plan_id!==env.RAZORPAY_SUBSCRIPTION_PLAN_ID)throw Error('Unexpected subscription plan');
+ // For delayed webhooks, Razorpay's current-cycle invoices are the source of truth.
+ // Do not grant access from the subscription status or a checkout callback alone.
+ await manualSyncSubscription(env,sub);
+ return sub;
 }
 async function manualVerifyPayment(env,order,paymentId){
  const gateway=await secureGateway(env,'GET','payments/'+encodeURIComponent(paymentId));
@@ -592,10 +648,10 @@ async function handleManual(req,env,isAdmin){
  if(route==='start'&&method==='POST'){
   const linked=await manualAccount(req,env);
   if(!linked)return err('Sign in with OTP to access your workspace',401);
-  return json({customer:linked,entitlement:await guestEntitlement(env,linked.id),new:false});
+  return json({customer:linked,entitlement:await guestEntitlement(env,linked.id),subscription:manualSubscriptionPublic(await manualCurrentSubscription(env,linked.id)),new:false});
  }
  if(route==='recover'||route==='rotate-recovery')return err('Use mobile OTP to access your orders',410);
- if(route==='status'&&method==='GET'){await rpc(env,'manual_free_cleanup_uploads',{p_customer:user.id});await rpc(env,'manual_refund_stale_uploads',{p_customer:user.id});return json({customer:user,entitlement:await guestEntitlement(env,user.id)});}
+ if(route==='status'&&method==='GET'){await rpc(env,'manual_free_cleanup_uploads',{p_customer:user.id});await rpc(env,'manual_refund_stale_uploads',{p_customer:user.id});return json({customer:user,entitlement:await guestEntitlement(env,user.id),subscription:manualSubscriptionPublic(await manualCurrentSubscription(env,user.id))});}
 
  if(route==='update-customer'&&method==='POST'){
   const data=await req.json(),name=String(data.name||'').trim().slice(0,70),contact=String(data.contact||'').trim().slice(0,90);
@@ -604,10 +660,20 @@ async function handleManual(req,env,isAdmin){
   return json({saved:true});
  }
  if(route==='uploads'&&method==='GET')return json({uploads:await manualUploadList(env,user.id)});
+ if(route==='uploads/version'&&method==='GET')return json(await manualCollectionVersion(env,'manual_uploads',`?customer_id=eq.${encodeURIComponent(user.id)}&status=neq.uploading`,'updated_at'));
+ if(route==='uploads/changes'&&method==='GET'){
+  const since=url.searchParams.get('since');
+  if(!since||since.length>40||!Number.isFinite(Date.parse(since)))return err('Invalid update cursor');
+  return json({uploads:await manualUploadList(env,user.id,{since})});
+ }
  if(route==='gallery/version'&&method==='GET'){
-  // Only newest delivered ID is needed to determine if a gallery has changed.
-  const rows=await tbl(env,'GET','manual_customer_gallery',`?customer_id=eq.${encodeURIComponent(user.id)}&select=id&order=created_at.desc,id.desc&limit=1`);
-  return json({revision:rows?.[0]?.id||'empty'});
+  return json(await manualCollectionVersion(env,'manual_customer_gallery',`?customer_id=eq.${encodeURIComponent(user.id)}`,'created_at'));
+ }
+ if(route==='gallery/changes'&&method==='GET'){
+  const after=url.searchParams.get('after');
+  if(!after||after.length>40||!Number.isFinite(Date.parse(after)))return err('Invalid gallery cursor');
+  const rows=await tbl(env,'GET','manual_customer_gallery',`?customer_id=eq.${encodeURIComponent(user.id)}&created_at=gte.${encodeURIComponent(after)}&select=id,filename,created_at,upload_filename&order=created_at.desc,id.desc&limit=91`);
+  return json({images:(rows||[]).slice(0,90),truncated:(rows||[]).length>90});
  }
  if(route==='gallery/results'&&method==='GET'){
   const offset=Math.max(0,Math.min(100000,Number.parseInt(url.searchParams.get('offset')||'0',10)||0));
@@ -615,7 +681,7 @@ async function handleManual(req,env,isAdmin){
   const rows=await tbl(env,'GET','manual_customer_gallery',`?customer_id=eq.${encodeURIComponent(user.id)}&select=id,filename,created_at,upload_filename&order=created_at.desc,id.desc&limit=${count+1}&offset=${offset}`);
   return json({images:(rows||[]).slice(0,count),nextOffset:rows?.length>count?offset+count:null});
  }
- if(route==='payments'&&method==='GET'){const records=await tbl(env,'GET','manual_payments',`?customer_id=eq.${user.id}&select=id,kind,amount_paise,status,created_at,paid_at&order=created_at.desc&limit=100`);return json({payments:records||[]});}
+ if(route==='payments'&&method==='GET'){const records=await tbl(env,'GET','manual_subscription_charges',`?customer_id=eq.${user.id}&select=amount_paise,gateway_payment_id,created_at,period_start,period_end&order=created_at.desc&limit=100`);return json({payments:(records||[]).map(r=>({...r,kind:'subscription',status:'paid',paid_at:r.created_at}))});}
  if(route==='upload'&&method==='POST'){
   const f=await req.formData(),file=f.get('file');const info=validManualImage(file,8*1048576);
   const batch=String(f.get('batch')||'');const batchId=UUID_RE.test(batch)?batch:crypto.randomUUID();
@@ -646,36 +712,51 @@ async function handleManual(req,env,isAdmin){
   }
   return err('Unknown file type');
  }
- if(route==='plan/order'&&method==='POST'){
-  if(env.PAYMENTS_ENABLED!=='true'||!env.RAZORPAY_KEY_ID||!env.RAZORPAY_KEY_SECRET||!env.RAZORPAY_WEBHOOK_SECRET)return err('Razorpay payments are not configured',503);
-  const data=await req.json(),kind=data.kind; if(kind!=='month'&&kind!=='addon')return err('Invalid plan');
-  const plan=await guestEntitlement(env,user.id);
-  if(kind==='month'&&plan.active)return err('Your monthly plan is still active');
-  if(kind==='addon'&&(!plan.active||plan.remaining>0))return err('Add-on is available after your current 50 uploads are used');
-  const amount=kind==='month'?49900:9900;
-  const order=await secureGateway(env,'POST','orders',{amount,currency:'INR',receipt:'atv'+crypto.randomUUID().replace(/-/g,'').slice(0,28)});
-  await tbl(env,'POST','manual_payments','',{customer_id:user.id,kind,amount_paise:amount,gateway_order_id:order.id},{headers:{prefer:'return=minimal'}});
-  return json({orderId:order.id,keyId:env.RAZORPAY_KEY_ID,amount,kind});
+ if(route==='subscription/create'&&method==='POST'){
+  if(env.PAYMENTS_ENABLED!=='true'||!env.RAZORPAY_KEY_ID||!env.RAZORPAY_KEY_SECRET||!env.RAZORPAY_WEBHOOK_SECRET||!env.RAZORPAY_SUBSCRIPTION_PLAN_ID)return err('Subscription payments are not yet configured',503);
+  const entitlement=await guestEntitlement(env,user.id);
+  if(entitlement.active)return err('Your paid plan is already active. Manage your renewal instead.');
+  let existing=await manualCurrentSubscription(env,user.id);
+  if(existing&&['created','authenticated','active','pending','halted','paused'].includes(existing.status)){
+   // Prevent two recurring mandates for the same customer.
+   const remote=await manualReconcileSubscription(env,existing.gateway_subscription_id);
+   if(['created','authenticated'].includes(remote.status))return json({subscriptionId:remote.id,keyId:env.RAZORPAY_KEY_ID,status:remote.status});
+   return err('A subscription already exists for this account. Check its status or contact support.');
+  }
+  const plan=await secureGateway(env,'GET','plans/'+encodeURIComponent(env.RAZORPAY_SUBSCRIPTION_PLAN_ID));
+  if(plan.period!=='monthly'||Number(plan.interval)!==1||Number(plan.item?.amount)!==SUBSCRIPTION_AMOUNT||plan.item?.currency!=='INR')return err('Razorpay plan must be exactly ₹699 INR, monthly (every 1 month).',503);
+  const sub=await secureGateway(env,'POST','subscriptions',{plan_id:env.RAZORPAY_SUBSCRIPTION_PLAN_ID,total_count:120,quantity:1,customer_notify:false,notes:{athave_customer:user.id}});
+  if(!SUB_ID.test(sub.id||''))throw Error('Razorpay returned an invalid subscription ID');
+  await tbl(env,'POST','manual_subscriptions','',{customer_id:user.id,gateway_subscription_id:sub.id,plan_id:env.RAZORPAY_SUBSCRIPTION_PLAN_ID,status:'created'},{headers:{prefer:'return=minimal'}});
+  return json({subscriptionId:sub.id,keyId:env.RAZORPAY_KEY_ID,status:'created'});
  }
- if(route==='plan/verify'&&method==='POST'){
-  const d=await req.json();const orderId=String(d.razorpay_order_id||''),paymentId=String(d.razorpay_payment_id||''),sig=String(d.razorpay_signature||'');
-  if(!/^order_[A-Za-z0-9]{6,60}$/.test(orderId)||!/^pay_[A-Za-z0-9]{6,60}$/.test(paymentId)||!sig)return err('Invalid payment details');
-  const orders=await tbl(env,'GET','manual_payments',`?gateway_order_id=eq.${encodeURIComponent(orderId)}&customer_id=eq.${user.id}&select=*`);
-  if(!orders?.length)return err('Payment not found',404);
-  if(await hmacHex(env.RAZORPAY_KEY_SECRET,orderId+'|'+paymentId)!==sig)return err('Payment signature mismatch',403);
-  await manualVerifyPayment(env,orders[0],paymentId);
-  return json({paid:true,entitlement:await guestEntitlement(env,user.id)});
+ if(route==='subscription/verify'&&method==='POST'){
+  const d=await req.json(),id=String(d.razorpay_subscription_id||''),paymentId=String(d.razorpay_payment_id||''),sig=String(d.razorpay_signature||'');
+  if(!SUB_ID.test(id)||!PAY_ID.test(paymentId)||!/^[a-f0-9]{64}$/i.test(sig))return err('Invalid subscription authorisation details');
+  const owned=(await tbl(env,'GET','manual_subscriptions',`?gateway_subscription_id=eq.${encodeURIComponent(id)}&customer_id=eq.${user.id}&select=id`))?.[0];
+  if(!owned)return err('Subscription does not belong to your account',403);
+  // Razorpay subscription signature is HMAC(payment_id | subscription_id), unlike order checkout.
+  if(await hmacHex(env.RAZORPAY_KEY_SECRET,paymentId+'|'+id)!==sig.toLowerCase())return err('Subscription signature verification failed',403);
+  const sub=await manualReconcileSubscription(env,id);
+  return json({verified:true,status:sub.status,entitlement:await guestEntitlement(env,user.id)});
  }
- if(route==='plan/status'&&method==='GET'){
-  const orderId=url.searchParams.get('orderId')||'';
-  if(!/^order_[A-Za-z0-9]{6,60}$/.test(orderId))return err('Invalid order ID');
-  const list=await tbl(env,'GET','manual_payments',`?gateway_order_id=eq.${encodeURIComponent(orderId)}&customer_id=eq.${user.id}&select=*`);
-  const payment=list?.[0];if(!payment)return err('Unknown order',404);
-  if(payment.status==='paid')return json({paid:true,entitlement:await guestEntitlement(env,user.id)});
-  const transaction=await secureGateway(env,'GET','orders/'+encodeURIComponent(orderId)+'/payments');
-  const captured=(transaction.items||[]).find(p=>p.order_id===orderId&&p.status==='captured'&&p.currency==='INR'&&Number(p.amount)===payment.amount_paise);
-  if(captured){await manualVerifyPayment(env,payment,captured.id);return json({paid:true,entitlement:await guestEntitlement(env,user.id)})}
-  return json({paid:false});
+ if(route==='subscription/status'&&method==='GET'){
+  const sub=await manualCurrentSubscription(env,user.id);
+  if(!sub)return json({subscription:null,entitlement:await guestEntitlement(env,user.id)});
+  // A small, authenticated status check; charged entitlements are granted by signed webhooks.
+  const remote=env.RAZORPAY_KEY_ID&&env.RAZORPAY_KEY_SECRET?await manualReconcileSubscription(env,sub.gateway_subscription_id):null;
+  return json({subscription:manualSubscriptionPublic({...sub,status:remote?.status||sub.status}),entitlement:await guestEntitlement(env,user.id)});
+ }
+ if(route==='subscription/cancel'&&method==='POST'){
+  const sub=await manualCurrentSubscription(env,user.id);
+  if(!sub||!['created','authenticated','active','pending','halted','paused'].includes(sub.status))return err('There is no subscription to cancel');
+  if(sub.cancel_at_cycle_end)return json({cancelled:true,atCycleEnd:true});
+  const active=await guestEntitlement(env,user.id);
+  const atCycleEnd=active.active&&['active','pending','halted','paused'].includes(sub.status);
+  const remote=await secureGateway(env,'POST','subscriptions/'+encodeURIComponent(sub.gateway_subscription_id)+'/cancel',{cancel_at_cycle_end:atCycleEnd});
+  await tbl(env,'PATCH','manual_subscriptions',`?gateway_subscription_id=eq.${encodeURIComponent(sub.gateway_subscription_id)}&customer_id=eq.${user.id}`,
+   {status:remote.status||sub.status,cancel_at_cycle_end:atCycleEnd,updated_at:new Date().toISOString()},{headers:{prefer:'return=minimal'}});
+  return json({cancelled:true,atCycleEnd,entitlement:await guestEntitlement(env,user.id)});
  }
  if(route==='ai'&&method==='POST')return manualAi(env,user,await req.json());
  if(route==='ai/file'&&method==='GET'){

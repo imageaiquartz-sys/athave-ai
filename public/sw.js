@@ -1,15 +1,15 @@
 /* Athave AI V14 cache refresh: public static files only.
    Never cache API results, authenticated pages, sessions, uploads or payment data. */
-const CACHE = 'athave-static-v23-history-gallery-viewport-20261013';
+const CACHE = 'athave-static-v25-cache-splash-layout-20261017';
 const STATIC = [
   '/offline.html', '/favicon.png', '/favicon-48.png', '/favicon.ico',
-  '/manual.css', '/manual-app.js', '/manual-admin.css', '/manual-admin.js', '/luxury-theme.css', '/luxury-admin.css', '/pwa.js', '/manifest.webmanifest',
+  '/manual.css', '/manual-app.js', '/splash.js', '/manual-admin.css', '/manual-admin.js', '/luxury-theme.css', '/luxury-admin.css', '/pwa.js', '/manifest.webmanifest',
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-512.png', '/icons/apple-touch-icon.png',
   '/assets/athave-luxury-hero.webp', '/assets/athave-logo-official.webp', '/assets/athave-white-sneakers.webp', '/assets/athave-shirt.webp', '/assets/athave-earbuds-cutout.webp', '/assets/account-avatar.svg'
 ];
 const ASSETS = new Set(STATIC);
 // Recheck core code and styles online, rather than trapping users on an old UI.
-const REVALIDATE = new Set(['/manual.css', '/manual-app.js', '/manual-admin.css', '/manual-admin.js', '/luxury-theme.css', '/luxury-admin.css', '/pwa.js']);
+const REVALIDATE = new Set(['/manual.css', '/manual-app.js', '/splash.js', '/manual-admin.css', '/manual-admin.js', '/luxury-theme.css', '/luxury-admin.css', '/pwa.js']);
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {

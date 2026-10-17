@@ -1,3 +1,5 @@
+> **Historical document (V11).** For the new ₹699/month recurring subscription, use `SETUP-RAZORPAY-699-SUBSCRIPTIONS.md` instead. The old top-up and one-time pricing steps below are discontinued.
+
 # Athave AI V11 – installable PWA + Razorpay setup
 
 ## PWA

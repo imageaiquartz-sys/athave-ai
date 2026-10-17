@@ -2,13 +2,29 @@
 const $=id=>document.getElementById(id);
 const API='/api/manual/';
 const page=document.body.dataset.page;
-let customer=null, entitlement=null, uploadFiles=[], uploadBusy=false, aiFiles=[], aiMessages=[];
+let customer=null, entitlement=null, subscription=null, uploadFiles=[], uploadBusy=false, aiFiles=[], aiMessages=[];
 let authUser=null, authAfter=null, authOpen=false, authPendingPhone='', checkoutBusy=false;
-const CACHE_KEYS={auth:'athave_auth_cache_v1',session:'athave_session_cache_v1',gallery:'athave_customer_gallery_v23_'};
+const CACHE_KEYS={auth:'athave_auth_cache_v2',session:'athave_session_cache_v2',gallery:'athave_customer_gallery_v24_',uploads:'athave_customer_uploads_v24_'};
+const SESSION_FRESH_MS=60000; // Server remains authoritative; caches only speed up verified account display.
+let lastEntitlementCheck=0,uploadsLastCheck=0;
 const readCache=key=>{try{return JSON.parse(localStorage.getItem(key)||'null')}catch{return null}};
 const writeCache=(key,val)=>{try{localStorage.setItem(key,JSON.stringify(val))}catch{}};
 const clearCache=key=>{try{localStorage.removeItem(key)}catch{}};
-function hydrateCachedState(){const a=readCache(CACHE_KEYS.auth),s=readCache(CACHE_KEYS.session); if(a&&a.user){authUser=a.user;} if(s){customer=s.customer||customer; entitlement=s.entitlement||entitlement;}}
+function hydrateCachedState(){
+ // Never render one customer's stored data before the HttpOnly session is verified.
+ if(!authUser?.id)return false;
+ const s=readCache(CACHE_KEYS.session);
+ if(!s?.customer || s.customer.account_customer_id!==authUser.id)return false;
+ customer=s.customer;entitlement=s.entitlement||null;subscription=s.subscription||null;
+ lastEntitlementCheck=s.ts||0;return true;
+}
+function saveSession(){if(customer?.account_customer_id===authUser?.id)writeCache(CACHE_KEYS.session,{customer,entitlement,subscription,ts:Date.now()});}
+function erasePrivateCache(id){
+ if(!id)return;
+ clearCache(CACHE_KEYS.gallery+id);clearCache(CACHE_KEYS.uploads+id);
+ if('caches' in window){Promise.all(['athave-gallery-previews-v23-','athave-private-previews-v24-'].map(prefix=>caches.delete(prefix+id))).catch(()=>{});}
+}
+
 const msg=(message,error=false,id='uploadMessage')=>{const node=$(id)||$('appToast');if(!node)return;node.textContent=message;node.classList.toggle('error',error);node.hidden=false};
 let loadingRequests=0;
 let uploadOverlayActive=false;
@@ -58,14 +74,20 @@ async function authAction(path,body,formId,done){
 function openAuth(after){authOverlay();if(typeof after==='function')authAfter=after;authOpen=true;$('athaveOtpOverlay').hidden=false;showAuthStep('mPhoneForm');authMessage('');setTimeout(()=>$('mPhone')?.focus(),30)}
 function closeAuth(){if(!authOpen)return;authOpen=false;$('athaveOtpOverlay').hidden=true;authAfter=null}
 async function getAuth(){
- try{const r=await fetch('/api/auth/session',{credentials:'same-origin',cache:'no-store'});if(!r.ok){authUser=null;clearCache(CACHE_KEYS.auth);return null}authUser=await r.json();writeCache(CACHE_KEYS.auth,{user:authUser,ts:Date.now()});return authUser}catch{authUser=null;clearCache(CACHE_KEYS.auth);return null}
+ try{
+  const r=await fetch('/api/auth/session',{credentials:'same-origin',cache:'no-store'});
+  if(!r.ok){erasePrivateCache(customer?.id||readCache(CACHE_KEYS.session)?.customer?.id);authUser=null;customer=null;entitlement=null;subscription=null;clearCache(CACHE_KEYS.auth);clearCache(CACHE_KEYS.session);return null;}
+  const verified=await r.json();if(!verified.authenticated||!verified.id){authUser=null;return null;}
+  if(customer?.account_customer_id&&customer.account_customer_id!==verified.id){erasePrivateCache(customer.id);customer=null;entitlement=null;subscription=null;}
+  authUser=verified;writeCache(CACHE_KEYS.auth,{user:verified,ts:Date.now()});return authUser;
+ }catch{authUser=null;customer=null;entitlement=null;subscription=null;return null;}
 }
 async function authSuccess(){
  const old=authAfter;authAfter=null;authOpen=false;$('athaveOtpOverlay').hidden=true;
- await getAuth();await boot();if(old)await old();
+ await getAuth();await boot({verified:true});if(old)await old();
 }
 async function signOut(){
- try{await postPublic('auth/logout',{});if(customer?.id){clearCache(CACHE_KEYS.gallery+customer.id);if('caches' in window)await caches.delete('athave-gallery-previews-v23-'+customer.id).catch(()=>{});}authUser=null;customer=null;entitlement=null;clearCache(CACHE_KEYS.auth);clearCache(CACHE_KEYS.session);uploadFiles=[];if($('allUploads'))$('allUploads').replaceChildren();updateProfileAuth();location.href='/profile/'}catch(e){msg(e.message,true,'profileStatus')}
+ try{await postPublic('auth/logout',{});erasePrivateCache(customer?.id);authUser=null;customer=null;entitlement=null;subscription=null;clearCache(CACHE_KEYS.auth);clearCache(CACHE_KEYS.session);uploadFiles=[];if($('allUploads'))$('allUploads').replaceChildren();updateProfileAuth();location.href='/profile/'}catch(e){msg(e.message,true,'profileStatus')}
 }
 async function postPublic(path,data){const r=await fetch('/api/'+path,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(data)});const j=await r.json().catch(()=>({}));if(!r.ok)throw Error(j.error||'Request failed');return j}
 async function signedInOrPrompt(action){if(authUser||await getAuth())return true;openAuth(action);return false}
@@ -95,39 +117,67 @@ async function loadGallery(){
 function date(d){return d?new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—'}
 async function refreshEntitlement(){
  if(!authUser)return;
- const state=await request('status');entitlement=state.entitlement;customer=state.customer||customer;
- writeCache(CACHE_KEYS.session,{customer,entitlement,ts:Date.now()});renderPlan();
+ const state=await request('status');entitlement=state.entitlement;subscription=state.subscription||null;customer=state.customer||customer;
+ lastEntitlementCheck=Date.now();saveSession();renderPlan();
 }
-async function initSession(){
+async function initSession({force=false}={}){
+ if(!force&&customer?.account_customer_id===authUser?.id&&Date.now()-lastEntitlementCheck<SESSION_FRESH_MS){
+  renderPlan();updateProfileAuth();return {customer,entitlement,subscription,cached:true};
+ }
  const fresh=await post('start',{});
- customer=fresh.customer;entitlement=fresh.entitlement;
- writeCache(CACHE_KEYS.session,{customer,entitlement,ts:Date.now()});
- renderPlan();updateProfileAuth();
- return fresh;
+ if(customer?.id&&customer.id!==fresh.customer?.id){erasePrivateCache(customer.id);}
+ customer=fresh.customer;entitlement=fresh.entitlement;subscription=fresh.subscription||null;
+ lastEntitlementCheck=Date.now();saveSession();
+ renderPlan();updateProfileAuth();return fresh;
 }
 function renderPlan(){
  const e=entitlement||{},free=e.active&&e.freeAccess;
  if($('planRemaining'))$('planRemaining').textContent=free?'∞':e.active?e.remaining:0;
  if($('planUsage'))$('planUsage').textContent=free?'Admin access':e.active?e.used+' / '+e.uploadCap:'No active plan';
  if($('planUntil'))$('planUntil').textContent=free?'Until revoked':e.active?date(e.periodEnd):'—';
- if($('planAction'))$('planAction').textContent=free?'My gallery →':!e.active?'Start ₹499 plan →':e.remaining===0?'Add 50 uploads →':'View plans →';
+ if($('planAction'))$('planAction').textContent=free?'My gallery →':!e.active?'Subscribe for ₹699 →':e.remaining===0?'Await next monthly renewal →':'Manage subscription →';
  if($('planAction'))$('planAction').href=free?'/gallery/':'/topup/';
  if($('profileRemaining'))$('profileRemaining').textContent=free?'∞':e.active?e.remaining:0;
  if($('profileEnd'))$('profileEnd').textContent=free?'Free access':e.active?date(e.periodEnd):'—';
- if($('profilePlanAction'))$('profilePlanAction').textContent=free?'View my gallery →':!e.active?'Start plan →':e.remaining===0?'Buy 50 uploads →':'Manage plan →';
+ if($('profilePlanAction'))$('profilePlanAction').textContent=free?'View my gallery →':!e.active?'Subscribe for ₹699 →':'Manage subscription →';
  if($('profilePlanAction'))$('profilePlanAction').href=free?'/gallery/':'/topup/';
  if($('pricingBalance'))$('pricingBalance').textContent=free?'Complimentary access provided by admin':e.active?`${e.remaining} of ${e.uploadCap} uploads available`:'No active plan';
- if($('pricingDeadline'))$('pricingDeadline').textContent=free?'Access stays active until your admin ends it. Daily AI safety limits apply.':e.active?'Plan ends '+date(e.periodEnd):'Start your 30-day plan to upload photos.';
- for(const button of document.querySelectorAll('[data-buy]')){
-  const kind=button.dataset.buy;button.disabled=free||(kind==='month'?!!e.active:!e.active||e.remaining>0);
-  button.title=free?'Complimentary access is active':kind==='month'&&e.active?'Already active':kind==='addon'&&(!e.active||e.remaining>0)?'Available after your uploads are used':'';
- }
+ if($('pricingDeadline'))$('pricingDeadline').textContent=free?'Access stays active until your admin ends it. Daily AI safety limits apply.':e.active?((subscription?.cancelAtCycleEnd?'Access ends ':'Current period ends ')+date(e.periodEnd)):'Subscribe for ₹699 per month to upload photos.';
+ const btn=document.querySelector('[data-buy="month"]');
+ if(btn){btn.disabled=free||!!e.active||!!(subscription&&['created','authenticated','active','pending','halted','paused'].includes(subscription.status)&&subscription.status!=='created');
+  btn.textContent=e.active?'Plan active':subscription?.status==='created'?'Complete subscription →':subscription?.status==='authenticated'?'Authorisation pending →':'Subscribe for ₹699/month →';}
+ const status=$('subscriptionState');if(status){status.textContent=!subscription?'No recurring mandate yet.':
+  subscription.cancelAtCycleEnd?'Auto-renewal stopped; you retain access through the paid period.':
+  subscription.status==='active'?'Automatic monthly renewal is active.':
+  subscription.status==='created'?'Subscription created. Complete the checkout to authorise recurring payments.':
+  subscription.status==='authenticated'?'Mandate authorised. Waiting for first monthly charge.':
+  subscription.status==='pending'||subscription.status==='halted'?'Renewal payment unsuccessful. Please check your Razorpay payment method.':
+  'Subscription status: '+subscription.status+'.';}
+ const cancel=$('cancelSubscription');if(cancel)cancel.hidden=!(subscription&&['created','authenticated','active','pending','halted','paused'].includes(subscription.status)&&!subscription.cancelAtCycleEnd&&!free);
 }
 function mimeOk(file){return ['image/jpeg','image/png','image/webp'].includes(file.type)&&file.size>0&&file.size<=8*1048576}
 function imageUrl(id,type='source'){return API+'file?kind='+encodeURIComponent(type)+'&id='+encodeURIComponent(id)}
+const previewObjectUrls=[];
+async function cachedPrivatePreview(img,src){
+ const uid=customer?.id;if(!uid||!('caches' in window)){img.src=src;return;}
+ try{
+  const cache=await caches.open('athave-private-previews-v24-'+uid);
+  let response=await cache.match(src);
+  if(!response){
+   const remote=await fetch(src,{credentials:'same-origin',cache:'no-store'});
+   if(!remote.ok)throw Error('Image unavailable');
+   response=remote.clone();try{
+    await cache.put(src,remote);
+    const keys=await cache.keys();if(keys.length>50)await Promise.all(keys.slice(0,keys.length-50).map(k=>cache.delete(k)));
+   }catch{}
+  }
+  if(!img.isConnected)return;
+  const blobUrl=URL.createObjectURL(await response.blob());previewObjectUrls.push(blobUrl);img.src=blobUrl;
+ }catch{if(img.isConnected)img.src=src;}
+}
 function drawUploads(root,list){if(!root)return;root.replaceChildren();if(!list.length){root.innerHTML='<div class="m-empty">No uploads yet. <a href="/create/" style="text-decoration:underline">Start uploading →</a></div>';return}
  for(const x of list){const item=document.createElement('article');item.className='m-order';
-  const preview=document.createElement('img');preview.className='m-order-thumb';preview.src=imageUrl(x.id);preview.alt='Uploaded product';preview.loading='lazy';
+  const preview=document.createElement('img');preview.className='m-order-thumb';preview.dataset.src=imageUrl(x.id);preview.alt='Uploaded product';preview.loading='lazy';
   const info=document.createElement('div');info.className='m-order-info';
   const title=document.createElement('strong');title.textContent=x.filename;
   const sub=document.createElement('small');sub.textContent=date(x.created_at);
@@ -136,15 +186,34 @@ function drawUploads(root,list){if(!root)return;root.replaceChildren();if(!list.
   for(const [i,out] of (x.deliveries||[]).entries()){
    const link=document.createElement('a');link.href=imageUrl(out.id,'result');link.className='m-result-link';link.download=out.filename;link.textContent='Download '+(i+1)+' ↓';files.append(link)
   }
-  info.append(title,sub,status,files);item.append(preview,info);root.append(item);
+  info.append(title,sub,status,files);item.append(preview,info);root.append(item);cachedPrivatePreview(preview,preview.dataset.src);
  }
 }
-async function loadUploads(){const response=await request('uploads');drawUploads($('allUploads'),response.uploads);drawUploads($('recentUploads'),response.uploads.slice(0,4));}
-let galleryNextOffset=0,galleryLoading=false,galleryItems=[],galleryRevision='';
+function uploadsKey(){return customer?.id?CACHE_KEYS.uploads+customer.id:null;}
+function savedUploads(){const key=uploadsKey(),data=key&&readCache(key);return data?.owner===authUser?.id?data:null;}
+function renderUploads(list){previewObjectUrls.splice(0).forEach(url=>URL.revokeObjectURL(url));drawUploads($('allUploads'),list);drawUploads($('recentUploads'),list.slice(0,4));}
+function persistUploads(items,meta){const key=uploadsKey();if(key)writeCache(key,{owner:authUser.id,items:items.slice(0,300),meta,ts:Date.now()});}
+async function loadUploads({force=false}={}){
+ const saved=savedUploads();if(saved&&!force)renderUploads(saved.items);
+ // One tiny metadata response before deciding whether upload rows need reloading.
+ // Force is used after a successful new upload or administrative change.
+ const meta=await request('uploads/version');uploadsLastCheck=Date.now();
+ if(!force&&saved?.meta?.revision===meta.revision&&saved?.meta?.count===meta.count)return;
+ let list=null;
+ if(!force&&saved?.meta?.latestUpdatedAt&&saved.meta.count!==null&&meta.count>=saved.meta.count){
+  const diff=await request('uploads/changes?since='+encodeURIComponent(saved.meta.latestUpdatedAt));
+  const changed=diff.uploads||[],known=new Map(saved.items.map(x=>[x.id,x]));
+  changed.forEach(row=>known.set(row.id,row));
+  if(known.size===Math.min(300,meta.count))list=[...known.values()].sort((a,b)=>b.created_at.localeCompare(a.created_at)).slice(0,300);
+ }
+ if(!list){const result=await request('uploads');list=result.uploads||[];}
+ persistUploads(list,meta);renderUploads(list);
+}
+let galleryNextOffset=0,galleryLoading=false,galleryItems=[],galleryRevision='',galleryCount=null;
 let galleryObserver=null;const galleryObjectUrls=[];
 async function galleryCachedPreview(img,src){
  const uid=customer?.id;if(!uid){img.src=src;return}
- const cacheName='athave-gallery-previews-v23-'+uid;
+ const cacheName='athave-private-previews-v24-'+uid;
  try{
   if(!('caches' in window)){img.src=src;return}
   const cache=await caches.open(cacheName);let response=await cache.match(src);
@@ -160,7 +229,7 @@ async function galleryCachedPreview(img,src){
 
 function galleryKey(){return customer?.id?CACHE_KEYS.gallery+customer.id:null}
 function cachedGallery(){const k=galleryKey();return k?readCache(k):null}
-function storeGallery(){const k=galleryKey();if(k)writeCache(k,{revision:galleryRevision,items:galleryItems.slice(0,250),nextOffset:galleryNextOffset,updatedAt:Date.now()})}
+function storeGallery(){const k=galleryKey(),items=galleryItems.slice(0,250);if(k)writeCache(k,{owner:authUser?.id,count:galleryCount,revision:galleryRevision,items,nextOffset:galleryNextOffset===null&&galleryItems.length<=250?null:Math.min(items.length,galleryNextOffset??items.length),updatedAt:Date.now()})}
 function drawCustomerGallery(){
  const root=$('galleryGrid'),more=$('galleryMore');if(!root)return;
  if(galleryObserver)galleryObserver.disconnect();galleryObjectUrls.splice(0).forEach(uri=>URL.revokeObjectURL(uri));
@@ -180,7 +249,7 @@ function drawCustomerGallery(){
 async function loadCustomerGallery(reset=false){
  const root=$('galleryGrid'),more=$('galleryMore');if(!root||galleryLoading)return;
  if(reset){
-  const cache=cachedGallery();galleryItems=cache?.items||[];galleryNextOffset=cache?.nextOffset??0;galleryRevision=cache?.revision||'';
+  const raw=cachedGallery(),cache=raw?.owner===authUser?.id?raw:null;galleryItems=cache?.items||[];galleryNextOffset=cache?.nextOffset??0;galleryRevision=cache?.revision||'';galleryCount=cache?.count??null;
   if(cache)drawCustomerGallery();
  }
  if(!reset&&galleryNextOffset===null)return;
@@ -189,8 +258,20 @@ async function loadCustomerGallery(reset=false){
   if(reset){
    // Single tiny metadata check; don't reload gallery rows when admin has not delivered anything.
    const meta=await request('gallery/version');
-   if(meta.revision===galleryRevision&&cachedGallery()){msg('',false,'galleryMessage');return}
-   galleryItems=[];galleryNextOffset=0;galleryRevision=meta.revision;
+   if(meta.revision===galleryRevision&&meta.count===galleryCount&&cachedGallery()){msg('',false,'galleryMessage');return}
+   const oldCount=galleryCount;
+   // An additive delivery can be merged into the cached pages without downloading old rows.
+   if(galleryItems.length&&Number.isInteger(oldCount)&&meta.count>oldCount&&galleryNextOffset!==undefined){
+    const d=await request('gallery/changes?after='+encodeURIComponent(galleryItems[0].created_at));
+    const existingIds=new Set(galleryItems.map(x=>x.id));
+    const additions=(d.images||[]).filter(x=>!existingIds.has(x.id));
+    if(additions.length===meta.count-oldCount&&!d.truncated){
+     galleryItems=[...additions,...galleryItems].slice(0,250);
+     if(galleryNextOffset!==null)galleryNextOffset+=additions.length;
+     galleryRevision=meta.revision;galleryCount=meta.count;storeGallery();drawCustomerGallery();msg('',false,'galleryMessage');return;
+    }
+   }
+   galleryItems=[];galleryNextOffset=0;galleryRevision=meta.revision;galleryCount=meta.count;
   }
   const data=await request('gallery/results?offset='+galleryNextOffset);
   const items=data.images||[];galleryItems=reset?items:galleryItems.concat(items.filter(x=>!galleryItems.some(y=>y.id===x.id)));
@@ -204,7 +285,7 @@ async function loadPayments(){
  if(!data.payments?.length){root.innerHTML='<p class="m-muted">No transactions yet.</p>';return}
  for(const pay of data.payments){
   const item=document.createElement('div');item.className='m-payment-row';
-  const left=document.createElement('div');const title=document.createElement('strong');title.textContent=pay.kind==='month'?'Monthly plan':'50 extra uploads';
+  const left=document.createElement('div');const title=document.createElement('strong');title.textContent='₹699 monthly subscription';
   const time=document.createElement('small');time.textContent=date(pay.paid_at||pay.created_at);left.append(title,time);
   const right=document.createElement('div');right.className='m-payment-right';const amount=document.createElement('strong');amount.textContent='₹'+(pay.amount_paise/100).toFixed(0);
   const state=document.createElement('small');state.textContent=pay.status==='paid'?'Paid':'Pending';right.append(amount,state);item.append(left,right);root.append(item)
@@ -220,8 +301,8 @@ async function uploadAll(){if(uploadBusy)return;
  if(!uploadFiles.length)return msg('Choose at least one image.',true);
  if(!await signedInOrPrompt(uploadAll))return;
  if(!entitlement?.active){try{await refreshEntitlement()}catch(e){return msg(e.message,true)}}
- if(!entitlement?.active)return msg('Start your ₹499 monthly plan first.',true);
- if(!entitlement.freeAccess&&uploadFiles.length>entitlement.remaining)return msg(`You have ${entitlement.remaining} uploads remaining. Upload fewer photos or add more after using your current allowance.`,true);
+ if(!entitlement?.active)return msg('Subscribe for ₹699/month before uploading.',true);
+ if(!entitlement.freeAccess&&uploadFiles.length>entitlement.remaining)return msg(`You have ${entitlement.remaining} uploads remaining. Upload fewer photos or continue after your next successful monthly renewal.`,true);
  uploadBusy=true;$('sendUploads').disabled=true;uploadOverlay(true);let done=0;const total=uploadFiles.length;const progress=$('uploadProgress');progress.hidden=false;
  try{
   const batch=crypto.randomUUID();let errors=[];
@@ -230,26 +311,42 @@ async function uploadAll(){if(uploadBusy)return;
    uploadOverlay(true,'Uploading '+(done+1)+' of '+total+' photos…');$('uploadProgressText').textContent='Uploading '+file.name;$('uploadPercent').textContent=Math.round(done/total*100)+'%';$('uploadBar').style.width=Math.round(done/total*100)+'%';
    try{await request('upload',{method:'POST',body:f});done++;uploadFiles=uploadFiles.filter(x=>x!==file)}catch(e){errors.push(file.name+': '+e.message);break}
   }
-  drawSelected();const state=await request('status');entitlement=state.entitlement;renderPlan();await loadUploads();
+  drawSelected();const state=await request('status');entitlement=state.entitlement;subscription=state.subscription||subscription;customer=state.customer||customer;lastEntitlementCheck=Date.now();saveSession();renderPlan();await loadUploads({force:true});
   $('uploadPercent').textContent=Math.round(done/total*100)+'%';$('uploadBar').style.width=Math.round(done/total*100)+'%';
   msg(errors.length?`${done} submitted. ${errors[0]}`:`${done} photo${done===1?'':'s'} submitted. Processing — expect results within 24 hours.`,!!errors.length);
  }catch(e){msg(e.message,true)}finally{uploadBusy=false;uploadOverlay(false);$('sendUploads').disabled=false;setTimeout(()=>{progress.hidden=true;$('uploadBar').style.width='0'},1200)}
 }
-async function payment(kind){
- if(!await signedInOrPrompt(()=>payment(kind)))return;
+async function payment(){
+ if(!await signedInOrPrompt(payment))return;
  if(checkoutBusy)return;
- if(!window.Razorpay)return msg('Payment checkout is unavailable. Please refresh.',true,'paymentMessage');
- checkoutBusy=true;const buttons=[...document.querySelectorAll('[data-buy]')];buttons.forEach(x=>x.disabled=true);
+ if(!window.Razorpay)return msg('Razorpay checkout is unavailable. Please refresh.',true,'paymentMessage');
+ checkoutBusy=true;const button=document.querySelector('[data-buy="month"]');if(button)button.disabled=true;
  try{
-  const order=await post('plan/order',{kind});
-  const checkout=new Razorpay({key:order.keyId,amount:order.amount,currency:'INR',name:'Athave AI',description:kind==='month'?'30-day upload plan · 50 photos':'50 extra photo uploads',order_id:order.orderId,theme:{color:'#18191f'},
-   modal:{ondismiss:async()=>{await checkOrder(order.orderId);renderPlan()}},
-   handler:async proof=>{try{await post('plan/verify',proof);const state=await request('status');entitlement=state.entitlement;renderPlan();msg('Payment verified. Your uploads are available!',false,'paymentMessage')}catch(e){msg('Payment pending verification: '+e.message,true,'paymentMessage');await checkOrder(order.orderId)}}});
-  checkout.on('payment.failed',()=>msg('Payment was not completed.',true,'paymentMessage'));
+  const order=await post('subscription/create',{});
+  subscription={id:order.subscriptionId,status:order.status,cancelAtCycleEnd:false};renderPlan();
+  const checkout=new Razorpay({key:order.keyId,subscription_id:order.subscriptionId,name:'Athave AI',
+   description:'50 product photo uploads · ₹699 every month',theme:{color:'#18191f'},
+   modal:{ondismiss:()=>checkSubscription()},
+   handler:async proof=>{try{
+     const result=await post('subscription/verify',proof);
+     entitlement=result.entitlement;await checkSubscription();
+     msg(entitlement?.active?'Subscription active. Your 50 monthly uploads are ready!':'Payment authorisation received. Waiting for Razorpay to confirm the monthly charge.',false,'paymentMessage');
+    }catch(e){msg('Authorisation could not be confirmed: '+e.message,true,'paymentMessage');await checkSubscription()}}
+  });
+  checkout.on('payment.failed',()=>msg('Subscription authorisation was not completed.',true,'paymentMessage'));
   checkout.open();
  }catch(e){msg(e.message,true,'paymentMessage')}finally{checkoutBusy=false;renderPlan()}
 }
-async function checkOrder(id){for(let attempt=0;attempt<5;attempt++){try{const s=await request('plan/status?orderId='+encodeURIComponent(id));if(s.paid){entitlement=s.entitlement;renderPlan();msg('Payment confirmed!',false,'paymentMessage');return true}}catch(e){if(attempt===4)msg(e.message,true,'paymentMessage')}if(attempt<4)await new Promise(r=>setTimeout(r,2500))}return false}
+async function checkSubscription(){
+ try{const d=await request('subscription/status');subscription=d.subscription;entitlement=d.entitlement;lastEntitlementCheck=Date.now();saveSession();renderPlan();return entitlement?.active}
+ catch(e){msg(e.message,true,'paymentMessage');return false}
+}
+async function cancelSubscription(){
+ if(!subscription||!window.confirm('Stop future ₹699 monthly charges? Your current paid access stays available until the end of this cycle.'))return;
+ const btn=$('cancelSubscription');if(btn)btn.disabled=true;
+ try{const data=await post('subscription/cancel',{});entitlement=data.entitlement;await checkSubscription();msg(data.atCycleEnd?'Auto-renewal cancelled. Access stays until this paid period ends.':'Unpaid subscription authorisation cancelled.',false,'paymentMessage')}
+ catch(e){msg(e.message,true,'paymentMessage')}finally{if(btn)btn.disabled=false}
+}
 async function fileToJpeg(file){
  if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>8*1048576)throw Error('Reference photo must be below 8 MB');
  const image=await createImageBitmap(file);const scale=Math.min(1,840/Math.max(image.width,image.height));const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.width*scale));canvas.height=Math.max(1,Math.round(image.height*scale));const ctx=canvas.getContext('2d');ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(image,0,0,canvas.width,canvas.height);image.close();return {mime:'image/jpeg',data:canvas.toDataURL('image/jpeg',.7).split(',')[1]};
@@ -300,12 +397,11 @@ async function aiSend(){const button=$('aiSend'),input=$('aiPrompt'),typed=input
  aiMessages.push({role:'user',text:message},{role:'assistant',text:ans.reply});aiFiles=[];showAiAttachments();msg('',false,'aiMessage');
  }catch(e){waiting.remove();aiLine('assistant','Request failed: '+e.message);msg(e.message,true,'aiMessage')}finally{button.disabled=false;button.removeAttribute('aria-busy');input.focus()}
 }
-async function boot(){
- hydrateCachedState();
- updateProfileAuth();
- if(customer||entitlement) renderPlan();
- if(page==='home'){await Promise.allSettled([showHero(),loadGallery(),getAuth().catch(()=>null)]);updateProfileAuth();return}
- await getAuth();updateProfileAuth();
+async function boot({verified=false}={}){
+ if(page==='home'){await Promise.allSettled([showHero(),loadGallery(),getAuth().catch(()=>null)]);updateProfileAuth();return;}
+ // Read cache only after the verified cookie identity is checked with the server.
+ if(!verified)await getAuth();if(authUser)hydrateCachedState();updateProfileAuth();
+ if(customer||entitlement)renderPlan();
  if(!authUser){
   customer=null;entitlement=null;renderPlan();
   if(page==='profile'||page==='gallery')openAuth();
@@ -320,11 +416,17 @@ async function boot(){
  }catch(e){msg(e.message,true,page==='topup'?'paymentMessage':page==='profile'?'profileStatus':'uploadMessage')}
 }
 if($('galleryMore'))$('galleryMore').onclick=()=>loadCustomerGallery(false);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&authUser&&['create','ai','profile','topup'].includes(page))refreshEntitlement().catch(()=>{});});
+document.addEventListener('visibilitychange',()=>{
+ if(document.hidden||!authUser)return;
+ if(Date.now()-lastEntitlementCheck>SESSION_FRESH_MS&&['create','ai','profile','topup','gallery'].includes(page))refreshEntitlement().catch(()=>{});
+ if(Date.now()-uploadsLastCheck>SESSION_FRESH_MS&&['create','profile'].includes(page))loadUploads().catch(()=>{});
+ if(page==='gallery')loadCustomerGallery(true).catch(()=>{});
+});
 if($('manualImages'))$('manualImages').addEventListener('change',ev=>{pickFiles([...ev.target.files]);ev.target.value=''});
 if($('photoDrop')){const label=$('photoDrop');label.addEventListener('dragover',e=>{e.preventDefault();label.classList.add('is-dragging')});label.addEventListener('dragleave',()=>label.classList.remove('is-dragging'));label.addEventListener('drop',e=>{e.preventDefault();label.classList.remove('is-dragging');pickFiles([...e.dataTransfer.files])})}
 if($('sendUploads'))$('sendUploads').onclick=uploadAll;
-for(const button of document.querySelectorAll('[data-buy]'))button.onclick=()=>payment(button.dataset.buy);
+for(const button of document.querySelectorAll('[data-buy]'))button.onclick=payment;
+if($('cancelSubscription'))$('cancelSubscription').onclick=cancelSubscription;
 if($('profileAuthAction'))$('profileAuthAction').onclick=()=>authUser?signOut():openAuth();
 if($('verifiedBadge'))$('verifiedBadge').onclick=()=>{if(!authUser)openAuth()};
 if($('aiAddPhotos'))$('aiAddPhotos').onclick=()=>$('aiFiles')?.click();
