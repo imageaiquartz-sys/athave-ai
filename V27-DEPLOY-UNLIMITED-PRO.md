@@ -2,7 +2,7 @@
 
 **Deployment order is essential.** This ZIP contains code, not live deployment or live Supabase migrations.
 
-1. In Supabase SQL Editor, ensure all previous migrations (V16/V17, V22, V23, **V24**) are installed; then run **`sql/V27-Unlimited-699-Pro-Access.sql`**. Run V27 LAST. This corrects previously installed 50-upload limits without deleting image records.
+1. In Supabase SQL Editor, ensure the baseline V16/V17, V22 and V23 migrations are installed. If the V24 charge table is missing, run **`sql/V27-FIX-MISSING-SUBSCRIPTION-TABLES.sql`** in full. This is the **one-step V27.1 repair**: it creates any missing V24 subscription tables first, then applies V27 unlimited Pro. Do not run the original V27 migration alone on an incomplete database. For databases where V24 has already been applied, `sql/V27-Unlimited-699-Pro-Access.sql` is sufficient. Existing customers, payment history and images are retained.
 2. Verify Cloudflare Pages production variables: `PAYMENTS_ENABLED=true`, `RAZORPAY_KEY_ID`, encrypted `RAZORPAY_KEY_SECRET`, `RAZORPAY_SUBSCRIPTION_PLAN_ID`, and encrypted `RAZORPAY_WEBHOOK_SECRET`. Your Razorpay Plan ID must reference a **monthly** INR **69900-paise** plan. Never share or commit private keys.
 3. Configure Razorpay's signed webhook `https://YOUR_DOMAIN/api/webhooks/razorpay` with **subscription.charged**, plus `subscription.authenticated`, `subscription.activated`, `subscription.pending`, `subscription.halted`, `subscription.cancelled`, `subscription.paused`, `subscription.resumed`, and `subscription.completed`.
 4. Deploy the ZIP repository to Cloudflare Pages, build command `exit 0`, output directory `public`; let the new service worker update existing PWAs. Use matching test/live credentials and webhook configuration.

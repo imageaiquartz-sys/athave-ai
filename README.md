@@ -13,3 +13,7 @@ Detailed Razorpay setup: `SETUP-RAZORPAY-699-SUBSCRIPTIONS.md` and `LIVE-RAZORPA
 Pages: `/`, `/create/`, `/gallery/`, `/ai/`, `/topup/`, `/profile/`, `/profile/payments/`, `/admin/`.
 
 Offline checks: `node tests/v27-static-and-entitlement.cjs`.
+
+
+## V27.1 missing subscription_charges fix
+If Supabase says `relation "public.manual_subscription_charges" does not exist`, run the **whole** `sql/V27-FIX-MISSING-SUBSCRIPTION-TABLES.sql` in SQL Editor. This one-step V27.1 repair bootstraps the missing V24 subscription tables before applying unlimited photo upload logic. Baseline V16 tables must already exist; no destructive schema reset. See `V27-DEPLOY-UNLIMITED-PRO.md`.
