@@ -691,18 +691,15 @@ async function handleManual(req,env,isAdmin){
   return json({uploads:await manualUploadList(env,user.id,{since})});
  }
  if(route==='gallery/version'&&method==='GET'){
-  const denied=await requirePro(env,user);if(denied)return denied;
   return json(await manualCollectionVersion(env,'manual_customer_gallery',`?customer_id=eq.${encodeURIComponent(user.id)}`,'created_at'));
  }
  if(route==='gallery/changes'&&method==='GET'){
-  const denied=await requirePro(env,user);if(denied)return denied;
   const after=url.searchParams.get('after');
   if(!after||after.length>40||!Number.isFinite(Date.parse(after)))return err('Invalid gallery cursor');
   const rows=await tbl(env,'GET','manual_customer_gallery',`?customer_id=eq.${encodeURIComponent(user.id)}&created_at=gte.${encodeURIComponent(after)}&select=id,filename,created_at,upload_filename&order=created_at.desc,id.desc&limit=91`);
   return json({images:(rows||[]).slice(0,90),truncated:(rows||[]).length>90});
  }
  if(route==='gallery/results'&&method==='GET'){
-  const denied=await requirePro(env,user);if(denied)return denied;
   const offset=Math.max(0,Math.min(100000,Number.parseInt(url.searchParams.get('offset')||'0',10)||0));
   const count=30;
   const rows=await tbl(env,'GET','manual_customer_gallery',`?customer_id=eq.${encodeURIComponent(user.id)}&select=id,filename,created_at,upload_filename&order=created_at.desc,id.desc&limit=${count+1}&offset=${offset}`);
@@ -725,7 +722,6 @@ async function handleManual(req,env,isAdmin){
   }catch(ex){await rpc(env,complimentary?'manual_free_cancel_upload':'manual_cancel_upload',{p_customer:user.id,p_upload:uploadId}).catch(()=>{});throw ex}
  }
  if(route==='file'&&method==='GET'){
-  const denied=await requirePro(env,user);if(denied)return denied;
   const kind=url.searchParams.get('kind'),id=url.searchParams.get('id');if(!UUID_RE.test(id||''))return err('Invalid file ID');
   if(kind==='source'){
    const rows=await tbl(env,'GET','manual_uploads',`?id=eq.${id}&customer_id=eq.${user.id}&select=source_path,mime_type`);
@@ -804,7 +800,6 @@ async function handleManual(req,env,isAdmin){
  }
  if(route==='ai'&&method==='POST'){const denied=await requirePro(env,user);if(denied)return denied;return manualAi(env,user,await req.json());}
  if(route==='ai/file'&&method==='GET'){
-  const denied=await requirePro(env,user);if(denied)return denied;
   const id=url.searchParams.get('id');if(!UUID_RE.test(id||''))return err('Invalid AI image');
   const rows=await tbl(env,'GET','manual_ai_images',`?id=eq.${id}&customer_id=eq.${user.id}&select=object_path,mime_type`);
   if(!rows?.length)return err('AI image not found',404);

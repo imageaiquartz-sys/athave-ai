@@ -132,23 +132,27 @@ async function initSession({force=false}={}){
  renderPlan();updateProfileAuth();return fresh;
 }
 function proActive(){return !!(authUser&&entitlement?.active&&(entitlement.freeAccess||Date.parse(entitlement.periodEnd)>Date.now()));}
+// Keep the complete website visible at all times. Only paid operations require Pro.
+// Non-paying customers may browse, prepare selections, and view their own historic work.
 function updateProGate(){
  if(!['create','ai','gallery'].includes(page))return;
  const main=document.querySelector('main');if(!main)return;
- let gate=$('proGate');
- if(!gate){gate=document.createElement('section');gate.id='proGate';gate.className='m-pro-gate m-panel';main.prepend(gate)}
- const unlocked=proActive();main.classList.toggle('m-pro-content-locked',!unlocked);gate.hidden=unlocked;
- if(!unlocked){
-  const heading=authUser?'Athave AI Pro required':'Sign in to activate Pro';
-  const detail=authUser?'Your paid month has ended, or a successful ₹699 charge has not yet been confirmed. Renew to unlock uploads, AI Studio and Gallery.':'Subscribe for ₹699/month to unlock unlimited uploads, AI Studio and Gallery.';
-  gate.replaceChildren();
-  const icon=document.createElement('span');icon.className='m-pro-gate-icon';icon.textContent='✦';
-  const title=document.createElement('h2');title.textContent=heading;
-  const para=document.createElement('p');para.textContent=detail;
-  const action=document.createElement('a');action.className='m-btn m-primary';action.href='/topup/';action.textContent=authUser?'View plan / Renew →':'Sign in & Subscribe →';
-  gate.append(icon,title,para,action);
-  if(page==='gallery'){galleryItems=[];galleryNextOffset=0;}
+ // Undo any full-page lock left by an older cached script.
+ main.classList.remove('m-pro-content-locked');
+ if(page==='gallery'){const old=$('proGate');if(old)old.remove();return;}
+ const active=proActive(),target=page==='create'?main.querySelector('.m-split .m-panel'):main.querySelector('.m-ai-box');
+ if(!target)return;
+ let hint=$('proGate');
+ if(!hint){
+  hint=document.createElement('div');hint.id='proGate';hint.className='m-pro-inline-notice';hint.setAttribute('role','status');
+  const note=document.createElement('span');note.className='m-pro-inline-text';hint.append(note);
+  const action=document.createElement('a');action.className='m-pro-inline-link';action.href='/topup/';action.textContent='Get Pro · ₹699/month →';hint.append(action);
+  if(page==='create')target.insertBefore(hint,$('photoDrop')||target.firstChild);
+  else target.insertBefore(hint,$('aiComposer')||target.lastChild);
  }
+ hint.hidden=active;
+ const note=hint.querySelector('.m-pro-inline-text');
+ if(note)note.textContent=page==='create'?'Uploads require Pro. Your page and previous photos stay available.':'AI generation and chat require Pro. Explore the Studio anytime.';
 }
 function renderPlan(){
  const e=entitlement||{},free=e.active&&e.freeAccess,active=proActive();
@@ -268,7 +272,7 @@ function drawCustomerGallery(){
  if(more)more.hidden=galleryNextOffset===null;
 }
 async function loadCustomerGallery(reset=false){
- const root=$('galleryGrid'),more=$('galleryMore');if(!root||galleryLoading||!proActive())return;
+ const root=$('galleryGrid'),more=$('galleryMore');if(!root||galleryLoading)return;
  if(reset){
   const raw=cachedGallery(),cache=raw?.owner===authUser?.id?raw:null;galleryItems=cache?.items||[];galleryNextOffset=cache?.nextOffset??0;galleryRevision=cache?.revision||'';galleryCount=cache?.count??null;
   if(cache)drawCustomerGallery();
@@ -332,7 +336,7 @@ async function uploadAll(){if(uploadBusy)return;
  if(!uploadFiles.length)return msg('Choose at least one image.',true);
  if(!await signedInOrPrompt(uploadAll))return;
  try{await refreshEntitlement()}catch(e){return msg(e.message,true)}
- if(!proActive()){updateProGate();return msg('An active, paid ₹699/month subscription is required to upload.',true)}
+ if(!proActive()){updateProGate();return msg('To submit your photos, subscribe to Athave AI Pro for ₹699/month. Your selected photos will stay on this page.',true)}
  if(uploadFiles.length>MAX_UPLOADS_PER_BATCH)return msg('Upload up to 10 photos in one batch.',true);
  uploadBusy=true;$('sendUploads').disabled=true;uploadOverlay(true);let done=0;const total=uploadFiles.length;const progress=$('uploadProgress');progress.hidden=false;
  try{
@@ -422,7 +426,7 @@ async function aiSend(){const button=$('aiSend'),input=$('aiPrompt'),typed=input
  if(!message)return msg('Write a message or attach a photo.',true,'aiMessage');
  if(!await signedInOrPrompt(aiSend))return;
  try{await refreshEntitlement()}catch(e){return msg(e.message,true,'aiMessage')}
- if(!proActive()){updateProGate();return msg('An active, paid ₹699/month subscription is required for AI Studio.',true,'aiMessage')}
+ if(!proActive()){updateProGate();return msg('Subscribe to Athave AI Pro for ₹699/month to send messages or generate images.',true,'aiMessage')}
  button.disabled=true;button.setAttribute('aria-busy','true');aiLine('user',message);input.value='';aiLine('assistant','');const waiting=$('aiThread').lastChild;waiting.querySelector('div').innerHTML='<span class="m-dots" aria-label="AI is working"><i></i><i></i><i></i></span>';
  try{const images=await Promise.all(aiFiles.map(fileToJpeg));const history=aiMessages.slice(-8);const ans=await post('ai',{message,mode,images,history});waiting.remove();aiLine('assistant',ans.reply,ans.imageId);
  aiMessages.push({role:'user',text:message},{role:'assistant',text:ans.reply});aiFiles=[];showAiAttachments();msg('',false,'aiMessage');
@@ -435,15 +439,20 @@ async function boot({verified=false}={}){
  if(customer||entitlement)renderPlan();
  if(!authUser){
   customer=null;entitlement=null;renderPlan();
-  if(page==='profile'||page==='gallery')openAuth();
+  if(page==='profile')openAuth();
+  if(page==='gallery'){
+   const root=$('galleryGrid');
+   if(root){root.replaceChildren();const msg=document.createElement('div');msg.className='m-empty';msg.textContent='Sign in to see your private gallery. ';
+    const button=document.createElement('button');button.type='button';button.className='m-btn m-secondary m-small';button.textContent='Sign in →';button.onclick=()=>openAuth();msg.append(button);root.append(msg);}
+  }
   return;
  }
  try{
   await initSession({force:['create','ai','gallery'].includes(page)});
   // Revalidate the server-verified entitlement on every Pro page opening.
   if(page==='topup')await checkSubscription();
-  if(page==='create'&&proActive())await loadUploads();
-  if(page==='gallery'&&proActive())await loadCustomerGallery(true)
+  if(page==='create')await loadUploads();
+  if(page==='gallery')await loadCustomerGallery(true)
   if(page==='profile')await loadUploads();
   if(page==='payments')await loadPayments();
  }catch(e){msg(e.message,true,page==='topup'?'paymentMessage':page==='profile'?'profileStatus':'uploadMessage')}
@@ -453,7 +462,7 @@ document.addEventListener('visibilitychange',()=>{
  if(document.hidden||!authUser)return;
  if(Date.now()-lastEntitlementCheck>SESSION_FRESH_MS&&['create','ai','profile','topup','gallery'].includes(page))refreshEntitlement().catch(()=>{});
  if(Date.now()-uploadsLastCheck>SESSION_FRESH_MS&&['create','profile'].includes(page))loadUploads().catch(()=>{});
- if(page==='gallery'&&proActive())loadCustomerGallery(true).catch(()=>{});
+ if(page==='gallery')loadCustomerGallery(true).catch(()=>{});
 });
 if($('manualImages'))$('manualImages').addEventListener('change',ev=>{pickFiles([...ev.target.files]);ev.target.value=''});
 if($('photoDrop')){const label=$('photoDrop');label.addEventListener('dragover',e=>{e.preventDefault();label.classList.add('is-dragging')});label.addEventListener('dragleave',()=>label.classList.remove('is-dragging'));label.addEventListener('drop',e=>{e.preventDefault();label.classList.remove('is-dragging');pickFiles([...e.dataTransfer.files])})}

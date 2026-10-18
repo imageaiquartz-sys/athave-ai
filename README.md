@@ -2,7 +2,7 @@
 
 **Current customer plan: ₹699/month via Razorpay. Unlimited manual photo uploads in batches of up to 10 images (8 MB each).** There is no 50-photo monthly allowance or add-on pack.
 
-Upload, AI Studio and Gallery require an active **successfully paid** monthly subscription, or explicit complimentary access granted by the admin. Unpaid authorisation does not activate Pro. Cancelling renewal preserves access through the end of the paid billing period; after expiry, Pro locks until another captured monthly payment. Profile and Plans stay accessible to renew. AI Studio has independent daily fair-use limits.
+Every website page stays visible, including Upload, AI Studio and Gallery. **Submitting new uploads and sending AI Studio requests require a successfully paid** ₹699/month Pro subscription (or an admin grant); the server verifies access for every paid action. Existing private uploads, delivered gallery images and AI-generated files remain viewable by their verified owner after expiration. Unpaid authorisation does not activate Pro. Cancelling renewal preserves paid actions through the current paid period; expiry blocks only new paid actions. AI Studio has independent daily fair-use limits.
 
 ## Required deployment
 

@@ -46,7 +46,7 @@
 - Subscription Checkout verification uses HMAC-SHA256(`payment_id|subscription_id`) with `RAZORPAY_KEY_SECRET` and confirms the subscription belongs to the signed-in account; it does not activate service based only on the checkout callback.
 - Successful recurring charges must be **captured**, **INR 69900**, belong to the configured plan, and contain a valid monthly cycle. Only then does the atomic database RPC activate a paid period. There is no monthly upload quota; only the 10-photos-per-batch limit.
 - The SQL function applies each `gateway_payment_id` once. Delayed old-cycle events never overwrite a newer billing cycle.
-- Pro protects Upload, AI Studio, Gallery, and protected image retrieval on the server. Profile and billing pages stay accessible for renewal. Admin-granted complimentary access still works.
+- The backend requires Pro for **new Upload submissions** and **AI Studio requests**, while every page remains visible without payment. Signed-in owners can still view previously uploaded and delivered files after expiry. Profile and billing remain accessible for renewal. Admin-granted complimentary access still works.
 - If Razorpay is not configured, billing **remains unavailable**; code alone does not activate subscriptions.
 - Razorpay's current subscription API requires a finite `total_count`. The integration sets 120 monthly cycles (up to 10 years), not infinite billing. Customers can subscribe again afterward.
 - Cancel-at-cycle-end applies to active paid cycles; an unbilled `created`/`authenticated` mandate is canceled immediately if Razorpay does not yet have an active billing cycle.
