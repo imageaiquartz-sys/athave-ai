@@ -6,6 +6,7 @@ let customer=null, entitlement=null, subscription=null, uploadFiles=[], uploadBu
 let authUser=null, authAfter=null, authOpen=false, authPendingPhone='', checkoutBusy=false;
 const CACHE_KEYS={auth:'athave_auth_cache_v2',session:'athave_session_cache_v2',gallery:'athave_customer_gallery_v24_',uploads:'athave_customer_uploads_v24_'};
 const SESSION_FRESH_MS=60000; // Server remains authoritative; caches only speed up verified account display.
+const MAX_UPLOADS_PER_BATCH=10;
 let lastEntitlementCheck=0,uploadsLastCheck=0;
 const readCache=key=>{try{return JSON.parse(localStorage.getItem(key)||'null')}catch{return null}};
 const writeCache=(key,val)=>{try{localStorage.setItem(key,JSON.stringify(val))}catch{}};
@@ -130,22 +131,42 @@ async function initSession({force=false}={}){
  lastEntitlementCheck=Date.now();saveSession();
  renderPlan();updateProfileAuth();return fresh;
 }
+function proActive(){return !!(authUser&&entitlement?.active&&(entitlement.freeAccess||Date.parse(entitlement.periodEnd)>Date.now()));}
+function updateProGate(){
+ if(!['create','ai','gallery'].includes(page))return;
+ const main=document.querySelector('main');if(!main)return;
+ let gate=$('proGate');
+ if(!gate){gate=document.createElement('section');gate.id='proGate';gate.className='m-pro-gate m-panel';main.prepend(gate)}
+ const unlocked=proActive();main.classList.toggle('m-pro-content-locked',!unlocked);gate.hidden=unlocked;
+ if(!unlocked){
+  const heading=authUser?'Athave AI Pro required':'Sign in to activate Pro';
+  const detail=authUser?'Your paid month has ended, or a successful ₹699 charge has not yet been confirmed. Renew to unlock uploads, AI Studio and Gallery.':'Subscribe for ₹699/month to unlock unlimited uploads, AI Studio and Gallery.';
+  gate.replaceChildren();
+  const icon=document.createElement('span');icon.className='m-pro-gate-icon';icon.textContent='✦';
+  const title=document.createElement('h2');title.textContent=heading;
+  const para=document.createElement('p');para.textContent=detail;
+  const action=document.createElement('a');action.className='m-btn m-primary';action.href='/topup/';action.textContent=authUser?'View plan / Renew →':'Sign in & Subscribe →';
+  gate.append(icon,title,para,action);
+  if(page==='gallery'){galleryItems=[];galleryNextOffset=0;}
+ }
+}
 function renderPlan(){
- const e=entitlement||{},free=e.active&&e.freeAccess;
- if($('planRemaining'))$('planRemaining').textContent=free?'∞':e.active?e.remaining:0;
- if($('planUsage'))$('planUsage').textContent=free?'Admin access':e.active?e.used+' / '+e.uploadCap:'No active plan';
- if($('planUntil'))$('planUntil').textContent=free?'Until revoked':e.active?date(e.periodEnd):'—';
- if($('planAction'))$('planAction').textContent=free?'My gallery →':!e.active?'Subscribe for ₹699 →':e.remaining===0?'Await next monthly renewal →':'Manage subscription →';
+ const e=entitlement||{},free=e.active&&e.freeAccess,active=proActive();
+ if($('planRemaining'))$('planRemaining').textContent=active?'∞':0;
+ if($('planUsage'))$('planUsage').textContent=free?'Admin access':active?e.used+' uploaded · Unlimited':'No active plan';
+ if($('planUntil'))$('planUntil').textContent=free?'Until revoked':active?date(e.periodEnd):'—';
+ if($('planAction'))$('planAction').textContent=free?'My gallery →':!active?'Subscribe for ₹699 →':'Manage subscription →';
  if($('planAction'))$('planAction').href=free?'/gallery/':'/topup/';
- if($('profileRemaining'))$('profileRemaining').textContent=free?'∞':e.active?e.remaining:0;
- if($('profileEnd'))$('profileEnd').textContent=free?'Free access':e.active?date(e.periodEnd):'—';
- if($('profilePlanAction'))$('profilePlanAction').textContent=free?'View my gallery →':!e.active?'Subscribe for ₹699 →':'Manage subscription →';
+ if($('profileRemaining'))$('profileRemaining').textContent=active?'∞':0;
+ if($('profileEnd'))$('profileEnd').textContent=free?'Free access':active?date(e.periodEnd):'—';
+ if($('profilePlanAction'))$('profilePlanAction').textContent=free?'View my gallery →':!active?'Subscribe for ₹699 →':'Manage subscription →';
  if($('profilePlanAction'))$('profilePlanAction').href=free?'/gallery/':'/topup/';
- if($('pricingBalance'))$('pricingBalance').textContent=free?'Complimentary access provided by admin':e.active?`${e.remaining} of ${e.uploadCap} uploads available`:'No active plan';
- if($('pricingDeadline'))$('pricingDeadline').textContent=free?'Access stays active until your admin ends it. Daily AI safety limits apply.':e.active?((subscription?.cancelAtCycleEnd?'Access ends ':'Current period ends ')+date(e.periodEnd)):'Subscribe for ₹699 per month to upload photos.';
+ if($('pricingBalance'))$('pricingBalance').textContent=free?'Complimentary unlimited access provided by admin':active?'Unlimited photo uploads included':'No active plan';
+ if($('pricingDeadline'))$('pricingDeadline').textContent=free?'Access stays active until your admin ends it. AI fair-use safety limits apply.':active?((subscription?.cancelAtCycleEnd?'Access ends ':'Current paid period ends ')+date(e.periodEnd)):'Subscribe for ₹699 per month to unlock Pro.';
+ updateProGate();
  const btn=document.querySelector('[data-buy="month"]');
- if(btn){btn.disabled=free||!!e.active||!!(subscription&&['created','authenticated','active','pending','halted','paused'].includes(subscription.status)&&subscription.status!=='created');
-  btn.textContent=e.active?'Plan active':subscription?.status==='created'?'Complete subscription →':subscription?.status==='authenticated'?'Authorisation pending →':'Subscribe for ₹699/month →';}
+ if(btn){btn.disabled=free||active||!!(subscription&&['created','authenticated','active','pending','halted','paused'].includes(subscription.status)&&subscription.status!=='created');
+  btn.textContent=active?'Plan active':subscription?.status==='created'?'Complete subscription →':subscription?.status==='authenticated'?'Authorisation pending →':'Subscribe for ₹699/month →';}
  const status=$('subscriptionState');if(status){status.textContent=!subscription?'No recurring mandate yet.':
   subscription.cancelAtCycleEnd?'Auto-renewal stopped; you retain access through the paid period.':
   subscription.status==='active'?'Automatic monthly renewal is active.':
@@ -247,7 +268,7 @@ function drawCustomerGallery(){
  if(more)more.hidden=galleryNextOffset===null;
 }
 async function loadCustomerGallery(reset=false){
- const root=$('galleryGrid'),more=$('galleryMore');if(!root||galleryLoading)return;
+ const root=$('galleryGrid'),more=$('galleryMore');if(!root||galleryLoading||!proActive())return;
  if(reset){
   const raw=cachedGallery(),cache=raw?.owner===authUser?.id?raw:null;galleryItems=cache?.items||[];galleryNextOffset=cache?.nextOffset??0;galleryRevision=cache?.revision||'';galleryCount=cache?.count??null;
   if(cache)drawCustomerGallery();
@@ -296,13 +317,23 @@ function drawSelected(){const root=$('selectedImages');if(!root)return;root.repl
  const label=document.createElement('small');label.textContent=f.name;const button=document.createElement('button');button.type='button';button.textContent='×';button.setAttribute('aria-label','Remove '+f.name);button.onclick=()=>{uploadFiles=uploadFiles.filter(x=>x!==f);drawSelected()};
  box.append(img,label,button);root.append(box);
  }if($('fileCounter'))$('fileCounter').textContent=uploadFiles.length?uploadFiles.length+' photo'+(uploadFiles.length>1?'s':'')+' selected':'No photos selected';}
-function pickFiles(files){let rejected=0;for(const file of files){if(!mimeOk(file)){rejected++;continue}uploadFiles.push(file)}drawSelected();if(rejected)msg('Some files were skipped. Use JPG, PNG or WebP under 8 MB.',true)}
+function pickFiles(files){
+ let rejected=0,extra=0;
+ for(const file of files){
+  if(!mimeOk(file)){rejected++;continue}
+  if(uploadFiles.length>=MAX_UPLOADS_PER_BATCH){extra++;continue}
+  uploadFiles.push(file);
+ }
+ drawSelected();
+ if(extra)msg('Up to 10 photos per batch. Submit these first, then select the next 10. Monthly uploads are unlimited.',true);
+ else if(rejected)msg('Some photos were skipped. Use JPG, PNG or WebP under 8 MB.',true);
+}
 async function uploadAll(){if(uploadBusy)return;
  if(!uploadFiles.length)return msg('Choose at least one image.',true);
  if(!await signedInOrPrompt(uploadAll))return;
- if(!entitlement?.active){try{await refreshEntitlement()}catch(e){return msg(e.message,true)}}
- if(!entitlement?.active)return msg('Subscribe for ₹699/month before uploading.',true);
- if(!entitlement.freeAccess&&uploadFiles.length>entitlement.remaining)return msg(`You have ${entitlement.remaining} uploads remaining. Upload fewer photos or continue after your next successful monthly renewal.`,true);
+ try{await refreshEntitlement()}catch(e){return msg(e.message,true)}
+ if(!proActive()){updateProGate();return msg('An active, paid ₹699/month subscription is required to upload.',true)}
+ if(uploadFiles.length>MAX_UPLOADS_PER_BATCH)return msg('Upload up to 10 photos in one batch.',true);
  uploadBusy=true;$('sendUploads').disabled=true;uploadOverlay(true);let done=0;const total=uploadFiles.length;const progress=$('uploadProgress');progress.hidden=false;
  try{
   const batch=crypto.randomUUID();let errors=[];
@@ -325,12 +356,12 @@ async function payment(){
   const order=await post('subscription/create',{});
   subscription={id:order.subscriptionId,status:order.status,cancelAtCycleEnd:false};renderPlan();
   const checkout=new Razorpay({key:order.keyId,subscription_id:order.subscriptionId,name:'Athave AI',
-   description:'50 product photo uploads · ₹699 every month',theme:{color:'#18191f'},
+   description:'Unlimited product photo uploads · ₹699/month',theme:{color:'#18191f'},
    modal:{ondismiss:()=>checkSubscription()},
    handler:async proof=>{try{
      const result=await post('subscription/verify',proof);
      entitlement=result.entitlement;await checkSubscription();
-     msg(entitlement?.active?'Subscription active. Your 50 monthly uploads are ready!':'Payment authorisation received. Waiting for Razorpay to confirm the monthly charge.',false,'paymentMessage');
+     msg(entitlement?.active?'Athave AI Pro is active. Unlimited photo uploads are unlocked!':'Payment authorisation received. Waiting for Razorpay to confirm the monthly charge.',false,'paymentMessage');
     }catch(e){msg('Authorisation could not be confirmed: '+e.message,true,'paymentMessage');await checkSubscription()}}
   });
   checkout.on('payment.failed',()=>msg('Subscription authorisation was not completed.',true,'paymentMessage'));
@@ -390,8 +421,8 @@ async function aiSend(){const button=$('aiSend'),input=$('aiPrompt'),typed=input
  const message=typed||(aiFiles.length?(mode==='image'?'Create a professional product image using my attached photos.':'Please review my attached photos.'):'');
  if(!message)return msg('Write a message or attach a photo.',true,'aiMessage');
  if(!await signedInOrPrompt(aiSend))return;
- if(!entitlement?.active){try{await refreshEntitlement()}catch(e){return msg(e.message,true,'aiMessage')}}
- if(!entitlement?.active)return msg('Start the monthly plan to use AI Studio.',true,'aiMessage');
+ try{await refreshEntitlement()}catch(e){return msg(e.message,true,'aiMessage')}
+ if(!proActive()){updateProGate();return msg('An active, paid ₹699/month subscription is required for AI Studio.',true,'aiMessage')}
  button.disabled=true;button.setAttribute('aria-busy','true');aiLine('user',message);input.value='';aiLine('assistant','');const waiting=$('aiThread').lastChild;waiting.querySelector('div').innerHTML='<span class="m-dots" aria-label="AI is working"><i></i><i></i><i></i></span>';
  try{const images=await Promise.all(aiFiles.map(fileToJpeg));const history=aiMessages.slice(-8);const ans=await post('ai',{message,mode,images,history});waiting.remove();aiLine('assistant',ans.reply,ans.imageId);
  aiMessages.push({role:'user',text:message},{role:'assistant',text:ans.reply});aiFiles=[];showAiAttachments();msg('',false,'aiMessage');
@@ -400,7 +431,7 @@ async function aiSend(){const button=$('aiSend'),input=$('aiPrompt'),typed=input
 async function boot({verified=false}={}){
  if(page==='home'){await Promise.allSettled([showHero(),loadGallery(),getAuth().catch(()=>null)]);updateProfileAuth();return;}
  // Read cache only after the verified cookie identity is checked with the server.
- if(!verified)await getAuth();if(authUser)hydrateCachedState();updateProfileAuth();
+ if(!verified)await getAuth();if(authUser)hydrateCachedState();updateProfileAuth();updateProGate();
  if(customer||entitlement)renderPlan();
  if(!authUser){
   customer=null;entitlement=null;renderPlan();
@@ -408,11 +439,11 @@ async function boot({verified=false}={}){
   return;
  }
  try{
-  await initSession();
-  // Billing setup is checked only in Plans, not on every AI Studio opening.
+  await initSession({force:['create','ai','gallery'].includes(page)});
+  // Revalidate the server-verified entitlement on every Pro page opening.
   if(page==='topup')await checkSubscription();
-  if(page==='create')await loadUploads();
-  if(page==='gallery')await loadCustomerGallery(true)
+  if(page==='create'&&proActive())await loadUploads();
+  if(page==='gallery'&&proActive())await loadCustomerGallery(true)
   if(page==='profile')await loadUploads();
   if(page==='payments')await loadPayments();
  }catch(e){msg(e.message,true,page==='topup'?'paymentMessage':page==='profile'?'profileStatus':'uploadMessage')}
@@ -422,7 +453,7 @@ document.addEventListener('visibilitychange',()=>{
  if(document.hidden||!authUser)return;
  if(Date.now()-lastEntitlementCheck>SESSION_FRESH_MS&&['create','ai','profile','topup','gallery'].includes(page))refreshEntitlement().catch(()=>{});
  if(Date.now()-uploadsLastCheck>SESSION_FRESH_MS&&['create','profile'].includes(page))loadUploads().catch(()=>{});
- if(page==='gallery')loadCustomerGallery(true).catch(()=>{});
+ if(page==='gallery'&&proActive())loadCustomerGallery(true).catch(()=>{});
 });
 if($('manualImages'))$('manualImages').addEventListener('change',ev=>{pickFiles([...ev.target.files]);ev.target.value=''});
 if($('photoDrop')){const label=$('photoDrop');label.addEventListener('dragover',e=>{e.preventDefault();label.classList.add('is-dragging')});label.addEventListener('dragleave',()=>label.classList.remove('is-dragging'));label.addEventListener('drop',e=>{e.preventDefault();label.classList.remove('is-dragging');pickFiles([...e.dataTransfer.files])})}

@@ -29,7 +29,7 @@ After changing Cloudflare variables/secrets, **redeploy** to apply them. Do not 
 
 ## Required SQL migration
 
-Run `sql/V24-Razorpay-699-Subscription.sql` in Supabase SQL Editor **once** (after required prior migrations). It adds subscription tracking, payment idempotency and renewal upload counters. Save a database backup before applying it to the production database.
+Run `sql/V24-Razorpay-699-Subscription.sql` in Supabase SQL Editor **if it has not already been run**, after prior migrations. Then run **`sql/V27-Unlimited-699-Pro-Access.sql` LAST**. V27 disables the old 50-upload cap and requires a verified paid month for Pro. Save a database backup before production migrations.
 
 ## LIVE webhook
 
@@ -43,13 +43,13 @@ Run `sql/V24-Razorpay-699-Subscription.sql` in Supabase SQL Editor **once** (aft
 1. Confirm the live plan shows **₹699 INR**, period **monthly**, interval **1**, no add-ons/trial.
 2. Verify your Razorpay merchant account is approved for Subscriptions and relevant payment methods are enabled.
 3. Test the exact flow on **separate Test Mode keys and Test Mode plan**, not a live key or plan.
-4. Validate first payment, genuine `subscription.charged` webhook, 50 upload credits, duplicate webhook idempotency, renewals, failure and cancellation behavior. Confirm Supabase tables have correct entries.
+4. Validate first payment, genuine `subscription.charged` webhook, 10 photos per batch and unlimited additional batches, duplicate webhook idempotency, renewals, failure and cancellation behavior. Confirm Supabase tables have correct entries.
 5. With new, secure Live credentials, change `PAYMENTS_ENABLED` to `true`, redeploy and make **one supervised real subscription purchase**. Expect an actual ₹699 charge; use a payment method you control, confirm details before paying.
 
 ## Scope / limitations
 
 - Website offers only the ₹699/month automatic recurring plan, without additional top-ups.
-- Existing manual paid memberships are retained until they expire; no forced extra charge.
-- Each successful monthly charge grants the existing 50 uploads for the month; no new uploads credited merely from checkout success.
+- Existing uploads, finished images and charge history are retained; old one-time payments alone do not qualify as recurring Pro billing.
+- Each verified ₹699 monthly charge unlocks unlimited manual uploads for the paid cycle, in batches of 10; checkout mandate authentication alone never unlocks Pro.
 - Razorpay API requires `total_count`, currently set to **120 monthly cycles** (maximum ten years); it is not literally indefinite.
 - The ZIP contains public IDs but **no private secrets**. Nothing has been deployed, no subscription plan details have been read from your Razorpay account, and no real charge has been attempted.

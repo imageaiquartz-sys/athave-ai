@@ -1,18 +1,15 @@
-# Athave AI — V17 OTP + Paid Manual Photo Studio
+# Athave AI — V27 Pro Monthly Subscription
 
-**Read `V17-DEPLOY-AND-PAYMENTS.md` BEFORE deploying.** This version restores MSG91 phone OTP login, links manual uploads and results to verified customer accounts, adds a payment-history profile page and an admin-editable homepage image. It includes the new SQL patch `sql/v17_otp_accounts_permissions_and_hero.sql` to repair Supabase's `manual_customers` 403 permissions error.
+**Current customer plan: ₹699/month via Razorpay. Unlimited manual photo uploads in batches of up to 10 images (8 MB each).** There is no 50-photo monthly allowance or add-on pack.
 
-Routes: `/` homepage, `/create/` product photo uploads, `/profile/` verified profile, `/profile/payments/` account payment history, `/topup/` 30-day plans & add-ons, `/ai/` optional AI assistant, and `/admin/` admin delivery queue + homepage image controls.
+Upload, AI Studio and Gallery require an active **successfully paid** monthly subscription, or explicit complimentary access granted by the admin. Unpaid authorisation does not activate Pro. Cancelling renewal preserves access through the end of the paid billing period; after expiry, Pro locks until another captured monthly payment. Profile and Plans stay accessible to renew. AI Studio has independent daily fair-use limits.
 
-Pricing: ₹499 per 30-day **prepaid** membership with 50 original source image uploads; ₹99 adds 50 more uploads during an active period. **Automatic renewal is not yet implemented.** Razorpay and Supabase live integration require configuration and testing before production use.
+## Required deployment
 
-## Razorpay recurring subscription (V24)
+**Read `V27-DEPLOY-UNLIMITED-PRO.md` FIRST.** This requires both the previous recurring subscription migration (`sql/V24-Razorpay-699-Subscription.sql`) **and the new `sql/V27-Unlimited-699-Pro-Access.sql`** in Supabase; run V27 last. Deploy the `public/` folder and `functions/` API together to Cloudflare Pages.
 
-The public site now offers only the ₹699/month subscription. Follow **SETUP-RAZORPAY-699-SUBSCRIPTIONS.md**, including the new SQL migration and Cloudflare secret setup, before enabling payments. Older `PAYMENTS-AND-PWA-SETUP.md` describes the deprecated one-time payment plan; do not follow it for new sales.
+Detailed Razorpay setup: `SETUP-RAZORPAY-699-SUBSCRIPTIONS.md` and `LIVE-RAZORPAY-DEPLOY.md`. Keep secrets encrypted and outside source control. Older V16/V17/V22 documents and one-time payment guides are archived history, not the current pricing policy.
 
-## Razorpay plan configuration
-- `RAZORPAY-PLAN-CONFIGURATION.md` — Cloudflare setup for your supplied Razorpay plan ID (no secrets included).
+Pages: `/`, `/create/`, `/gallery/`, `/ai/`, `/topup/`, `/profile/`, `/profile/payments/`, `/admin/`.
 
-### Live ₹699 subscription deployment
-
-See **`LIVE-RAZORPAY-DEPLOY.md`** for the current Live public Key ID, subscription Plan ID, secret-rotation warning, Supabase SQL migration, and webhook checklist. Private credentials are not packaged.
+Offline checks: `node tests/v27-static-and-entitlement.cjs`.

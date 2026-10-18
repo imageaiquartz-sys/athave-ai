@@ -481,9 +481,18 @@ async function guestEntitlement(env,guestId){
  // Admin-granted access is independent of purchases: revoking never removes a paid membership.
  const complimentary=await hasComplimentaryAccess(env,guestId);
  const membership=(await tbl(env,'GET','manual_memberships',`?customer_id=eq.${guestId}&select=period_start,period_end,upload_cap,used`))?.[0]||null;
- const paidActive=!!membership&&new Date(membership.period_end).getTime()>Date.now();
+ // A membership row is not payment proof (legacy one-time orders also created rows).
+ // Only captured Razorpay subscription charge cycles covering the current time unlock Pro.
+ const now=new Date().toISOString();
+ const cycles=membership&&new Date(membership.period_end).getTime()>Date.now()
+  ?await tbl(env,'GET','manual_subscription_charges',`?customer_id=eq.${encodeURIComponent(guestId)}&period_start=lte.${encodeURIComponent(now)}&period_end=gt.${encodeURIComponent(now)}&select=period_end&order=period_end.desc&limit=1`):[];
+ const paidActive=!!cycles?.length;
  if(complimentary)return {active:true,kind:'admin',freeAccess:true,periodEnd:null,uploadCap:null,used:null,remaining:null};
- return {active:paidActive,kind:paidActive?'paid':'none',freeAccess:false,periodEnd:paidActive?membership.period_end:null,uploadCap:paidActive?membership.upload_cap:0,used:paidActive?membership.used:0,remaining:paidActive?Math.max(0,membership.upload_cap-membership.used):0};
+ return {active:paidActive,kind:paidActive?'paid':'none',freeAccess:false,periodEnd:paidActive?cycles[0].period_end:null,uploadCap:null,used:paidActive?membership.used:0,remaining:null};
+}
+async function requirePro(env,user){
+ const access=await guestEntitlement(env,user.id);
+ return access.active?null:err('Athave AI Pro requires a successfully paid ₹699 monthly subscription. Please renew to continue.',403);
 }
 async function manualUploadList(env,guestId,{since=null}={}){
  const delta=since?`&updated_at=gte.${encodeURIComponent(since)}`:'';
@@ -682,15 +691,18 @@ async function handleManual(req,env,isAdmin){
   return json({uploads:await manualUploadList(env,user.id,{since})});
  }
  if(route==='gallery/version'&&method==='GET'){
+  const denied=await requirePro(env,user);if(denied)return denied;
   return json(await manualCollectionVersion(env,'manual_customer_gallery',`?customer_id=eq.${encodeURIComponent(user.id)}`,'created_at'));
  }
  if(route==='gallery/changes'&&method==='GET'){
+  const denied=await requirePro(env,user);if(denied)return denied;
   const after=url.searchParams.get('after');
   if(!after||after.length>40||!Number.isFinite(Date.parse(after)))return err('Invalid gallery cursor');
   const rows=await tbl(env,'GET','manual_customer_gallery',`?customer_id=eq.${encodeURIComponent(user.id)}&created_at=gte.${encodeURIComponent(after)}&select=id,filename,created_at,upload_filename&order=created_at.desc,id.desc&limit=91`);
   return json({images:(rows||[]).slice(0,90),truncated:(rows||[]).length>90});
  }
  if(route==='gallery/results'&&method==='GET'){
+  const denied=await requirePro(env,user);if(denied)return denied;
   const offset=Math.max(0,Math.min(100000,Number.parseInt(url.searchParams.get('offset')||'0',10)||0));
   const count=30;
   const rows=await tbl(env,'GET','manual_customer_gallery',`?customer_id=eq.${encodeURIComponent(user.id)}&select=id,filename,created_at,upload_filename&order=created_at.desc,id.desc&limit=${count+1}&offset=${offset}`);
@@ -698,6 +710,7 @@ async function handleManual(req,env,isAdmin){
  }
  if(route==='payments'&&method==='GET'){const records=await tbl(env,'GET','manual_subscription_charges',`?customer_id=eq.${user.id}&select=amount_paise,gateway_payment_id,created_at,period_start,period_end&order=created_at.desc&limit=100`);return json({payments:(records||[]).map(r=>({...r,kind:'subscription',status:'paid',paid_at:r.created_at}))});}
  if(route==='upload'&&method==='POST'){
+  const denied=await requirePro(env,user);if(denied)return denied;
   const f=await req.formData(),file=f.get('file');const info=validManualImage(file,8*1048576);
   const batch=String(f.get('batch')||'');const batchId=UUID_RE.test(batch)?batch:crypto.randomUUID();
   const complimentary=await hasComplimentaryAccess(env,user.id);
@@ -712,6 +725,7 @@ async function handleManual(req,env,isAdmin){
   }catch(ex){await rpc(env,complimentary?'manual_free_cancel_upload':'manual_cancel_upload',{p_customer:user.id,p_upload:uploadId}).catch(()=>{});throw ex}
  }
  if(route==='file'&&method==='GET'){
+  const denied=await requirePro(env,user);if(denied)return denied;
   const kind=url.searchParams.get('kind'),id=url.searchParams.get('id');if(!UUID_RE.test(id||''))return err('Invalid file ID');
   if(kind==='source'){
    const rows=await tbl(env,'GET','manual_uploads',`?id=eq.${id}&customer_id=eq.${user.id}&select=source_path,mime_type`);
@@ -755,6 +769,19 @@ async function handleManual(req,env,isAdmin){
   // Razorpay subscription signature is HMAC(payment_id | subscription_id), unlike order checkout.
   if(await hmacHex(env.RAZORPAY_KEY_SECRET,paymentId+'|'+id)!==sig.toLowerCase())return err('Subscription signature verification failed',403);
   const sub=await manualReconcileSubscription(env,id);
+  // Authorisation is not a purchase. If this exact signed Checkout payment was
+  // already captured for ₹699, grant the verified cycle without waiting for a webhook.
+  // A ₹1 mandate-auth payment cannot unlock Pro. Webhook retries are idempotent.
+  const captured=await secureGateway(env,'GET','payments/'+encodeURIComponent(paymentId));
+  if(captured.status==='captured'&&captured.currency==='INR'&&Number(captured.amount)===SUBSCRIPTION_AMOUNT){
+   if(captured.subscription_id&&captured.subscription_id!==id)return err('Payment belongs to another subscription',403);
+   const cycleStart=Number(sub.current_start),cycleEnd=Number(sub.current_end);
+   // The gateway can return a captured payment before publishing the new cycle.
+   // In that case, wait for the signed subscription.charged webhook to grant access.
+   if(Number.isSafeInteger(cycleStart)&&cycleStart>0&&Number.isSafeInteger(cycleEnd)&&cycleEnd-cycleStart>=25*86400&&cycleEnd-cycleStart<=35*86400){
+    await manualApplySubscriptionCharge(env,sub,captured);
+   }
+  }
   return json({verified:true,status:sub.status,entitlement:await guestEntitlement(env,user.id)});
  }
  if(route==='subscription/status'&&method==='GET'){
@@ -775,8 +802,9 @@ async function handleManual(req,env,isAdmin){
    {status:remote.status||sub.status,cancel_at_cycle_end:atCycleEnd,updated_at:new Date().toISOString()},{headers:{prefer:'return=minimal'}});
   return json({cancelled:true,atCycleEnd,entitlement:await guestEntitlement(env,user.id)});
  }
- if(route==='ai'&&method==='POST')return manualAi(env,user,await req.json());
+ if(route==='ai'&&method==='POST'){const denied=await requirePro(env,user);if(denied)return denied;return manualAi(env,user,await req.json());}
  if(route==='ai/file'&&method==='GET'){
+  const denied=await requirePro(env,user);if(denied)return denied;
   const id=url.searchParams.get('id');if(!UUID_RE.test(id||''))return err('Invalid AI image');
   const rows=await tbl(env,'GET','manual_ai_images',`?id=eq.${id}&customer_id=eq.${user.id}&select=object_path,mime_type`);
   if(!rows?.length)return err('AI image not found',404);

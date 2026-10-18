@@ -1,0 +1,14 @@
+# Athave AI V27 — ₹699/month, unlimited uploads
+
+**Deployment order is essential.** This ZIP contains code, not live deployment or live Supabase migrations.
+
+1. In Supabase SQL Editor, ensure all previous migrations (V16/V17, V22, V23, **V24**) are installed; then run **`sql/V27-Unlimited-699-Pro-Access.sql`**. Run V27 LAST. This corrects previously installed 50-upload limits without deleting image records.
+2. Verify Cloudflare Pages production variables: `PAYMENTS_ENABLED=true`, `RAZORPAY_KEY_ID`, encrypted `RAZORPAY_KEY_SECRET`, `RAZORPAY_SUBSCRIPTION_PLAN_ID`, and encrypted `RAZORPAY_WEBHOOK_SECRET`. Your Razorpay Plan ID must reference a **monthly** INR **69900-paise** plan. Never share or commit private keys.
+3. Configure Razorpay's signed webhook `https://YOUR_DOMAIN/api/webhooks/razorpay` with **subscription.charged**, plus `subscription.authenticated`, `subscription.activated`, `subscription.pending`, `subscription.halted`, `subscription.cancelled`, `subscription.paused`, `subscription.resumed`, and `subscription.completed`.
+4. Deploy the ZIP repository to Cloudflare Pages, build command `exit 0`, output directory `public`; let the new service worker update existing PWAs. Use matching test/live credentials and webhook configuration.
+5. TEST: successful captured ₹699 subscription grants Pro. Signed checkout authorisation by itself does **not**; non-₹699 authentication payments do not activate. 10 JPG/PNG/WebP files upload in one batch, and another batch of 10 can be sent immediately. Sending 11 in the same batch is blocked. After 50+ uploaded photos in the same paid month, continue uploading without quota errors.
+6. TEST: duplicate `subscription.charged` webhook does not duplicate billing credits; failed/unpaid pending subscription does not grant Pro. Cancellation stops future renewal but keeps the paid access until the last paid cycle ends. On expiry without another successful monthly charge, **Upload, AI Studio, Gallery, and protected image endpoints** deny access, while Profile and Plans remain open. Successful renewal re-unlocks Pro.
+
+**Note:** The monthly plan has unlimited *manual photo submissions* while Pro is active, but allows at most 10 per batch and 8 MB per file. AI Studio still has independent daily fair-use/request safety controls. Upload processing/storage costs remain the owner's responsibility. Razorpay mandates still have a configured finite maximum of 120 billing cycles.
+
+**Legacy considerations:** V27 requires the previous V24 charge ledger. Old one-off membership rows alone do not activate Pro. Original uploaded and delivered images are retained; protected content is unavailable without active Pro (or an admin-granted complimentary account). No payment is activated without an authenticated captured charge confirmed server-side.
